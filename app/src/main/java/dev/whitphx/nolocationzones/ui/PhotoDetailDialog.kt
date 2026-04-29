@@ -10,11 +10,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
@@ -58,40 +55,19 @@ import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.util.Date
 
-/** Hint to [PhotoDetailDialog] which section the user came in for. The dialog stacks both
- *  panes regardless; the value just decides whether to start at the top (photo) or scrolled
- *  down to the map. */
-enum class PhotoDetailFocus { Photo, Location }
-
 /**
- * Full-screen dialog showing the photo and its EXIF-derived location stacked on a single page.
- * Photo on top (capped height so portrait shots don't dominate the screen), then the map below
- * with the user's zones overlaid. Skip / Strip GPS pinned at the bottom.
- *
- * The [initialFocus] argument is purely a scroll hint: if the user came in via the "Location"
- * action, we auto-scroll to the map; otherwise we stay at the top.
+ * Full-screen dialog that splits the viewport into two equal panes: the photo on top and the
+ * EXIF-derived location map below. Both visible at once, no scrolling. Skip / Strip GPS pinned
+ * at the bottom.
  */
 @Composable
 fun PhotoDetailDialog(
     item: PendingStrip,
     zones: List<Zone>,
-    initialFocus: PhotoDetailFocus = PhotoDetailFocus.Photo,
     onDismiss: () -> Unit,
     onStrip: () -> Unit,
     onSkip: () -> Unit,
 ) {
-    val scrollState = rememberScrollState()
-
-    LaunchedEffect(item.imageId, initialFocus) {
-        if (initialFocus == PhotoDetailFocus.Location) {
-            // Wait for layout to know the scroll bounds, then jump to the map (which lives at
-            // the bottom of the scrollable column). Polling is acceptable here — content is
-            // small and the wait is one or two frames.
-            while (scrollState.maxValue == 0) kotlinx.coroutines.yield()
-            scrollState.animateScrollTo(scrollState.maxValue)
-        }
-    }
-
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -104,19 +80,21 @@ fun PhotoDetailDialog(
             Column(modifier = Modifier.fillMaxSize()) {
                 Header(item = item, onDismiss = onDismiss)
 
-                Column(
+                PhotoPane(
+                    item = item,
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .verticalScroll(scrollState)
-                        .padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    Spacer(Modifier.height(8.dp))
-                    PhotoPane(item = item)
-                    LocationPane(item = item, zones = zones)
-                    Spacer(Modifier.height(8.dp))
-                }
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+                LocationPane(
+                    item = item,
+                    zones = zones,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                )
 
                 Row(
                     modifier = Modifier
@@ -174,18 +152,13 @@ private fun Header(item: PendingStrip, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun PhotoPane(item: PendingStrip) {
+private fun PhotoPane(item: PendingStrip, modifier: Modifier = Modifier) {
     val config = LocalConfiguration.current
     val sizePx = with(LocalDensity.current) {
         maxOf(config.screenWidthDp.dp.roundToPx(), config.screenHeightDp.dp.roundToPx())
     }
     val bitmap = rememberPhotoBitmap(item.contentUri, sizePx)
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 200.dp, max = 480.dp),
-        contentAlignment = Alignment.Center,
-    ) {
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
         if (bitmap != null) {
             Image(
                 bitmap = bitmap,
@@ -200,7 +173,7 @@ private fun PhotoPane(item: PendingStrip) {
 }
 
 @Composable
-private fun LocationPane(item: PendingStrip, zones: List<Zone>) {
+private fun LocationPane(item: PendingStrip, zones: List<Zone>, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     var coords: DoubleArray? by remember(item.imageId) { mutableStateOf(null) }
     var loaded by remember(item.imageId) { mutableStateOf(false) }
@@ -212,32 +185,30 @@ private fun LocationPane(item: PendingStrip, zones: List<Zone>) {
         loaded = true
     }
 
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = "Location",
-            color = Color.White,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(Modifier.height(4.dp))
+    Column(modifier = modifier) {
         when {
             !loaded -> Box(
-                modifier = Modifier.fillMaxWidth().height(120.dp),
+                modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
             ) {
                 CircularProgressIndicator(color = Color.White)
             }
-            coords == null -> Column {
-                Text(
-                    "No GPS data on this photo.",
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Text(
-                    "Either it never had any, or it has already been stripped.",
-                    color = Color.White.copy(alpha = 0.75f),
-                    style = MaterialTheme.typography.bodySmall,
-                )
+            coords == null -> Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column {
+                    Text(
+                        "No GPS data on this photo.",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        "Either it never had any, or it has already been stripped.",
+                        color = Color.White.copy(alpha = 0.75f),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
             else -> {
                 Text(
@@ -245,12 +216,12 @@ private fun LocationPane(item: PendingStrip, zones: List<Zone>) {
                     color = Color.White.copy(alpha = 0.85f),
                     style = MaterialTheme.typography.bodySmall,
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(4.dp))
                 MapBody(
                     lat = coords!![0],
                     lon = coords!![1],
                     zones = zones,
-                    modifier = Modifier.fillMaxWidth().height(320.dp),
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
         }
