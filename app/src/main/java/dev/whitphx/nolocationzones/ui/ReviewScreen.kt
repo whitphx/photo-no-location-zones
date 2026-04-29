@@ -22,9 +22,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.BrokenImage
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -72,7 +76,11 @@ fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
 
     var pendingTargetIds by remember { mutableStateOf<List<Long>>(emptyList()) }
     var preview: PendingStrip? by remember { mutableStateOf(null) }
+    var locationPreview: PendingStrip? by remember { mutableStateOf(null) }
     var skipAllConfirm by remember { mutableStateOf(false) }
+    var sortMenuOpen by remember { mutableStateOf(false) }
+    val zones by viewModel.zones.collectAsStateWithLifecycle()
+    val sortBy by viewModel.sortBy.collectAsStateWithLifecycle()
 
     val writeAccessLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult(),
@@ -133,6 +141,34 @@ fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
                 },
                 actions = {
                     IconButton(
+                        onClick = { sortMenuOpen = true },
+                        enabled = items.isNotEmpty(),
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort photos")
+                    }
+                    DropdownMenu(
+                        expanded = sortMenuOpen,
+                        onDismissRequest = { sortMenuOpen = false },
+                    ) {
+                        SortBy.entries.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option.label) },
+                                leadingIcon = if (option == sortBy) {
+                                    {
+                                        Icon(
+                                            Icons.Filled.Check,
+                                            contentDescription = null,
+                                        )
+                                    }
+                                } else null,
+                                onClick = {
+                                    viewModel.setSortBy(option)
+                                    sortMenuOpen = false
+                                },
+                            )
+                        }
+                    }
+                    IconButton(
                         onClick = { viewModel.rescan(PhotoRescanner.DEFAULT_DAYS_BACK) },
                         enabled = !rescanning,
                     ) {
@@ -162,6 +198,7 @@ fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
                         PendingRow(
                             item = item,
                             onClick = { preview = item },
+                            onShowLocation = { locationPreview = item },
                             onStrip = { viewModel.requestStripOne(item.imageId) },
                             onSkip = { viewModel.skipOne(item.imageId) },
                         )
@@ -216,6 +253,15 @@ fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
             onDismiss = { preview = null },
         )
     }
+
+    locationPreview?.let { item ->
+        LocationPreviewDialog(
+            uri = item.contentUri,
+            displayName = item.displayName,
+            zones = zones,
+            onDismiss = { locationPreview = null },
+        )
+    }
 }
 
 @Composable
@@ -241,6 +287,7 @@ private fun Header(count: Int) {
 private fun PendingRow(
     item: PendingStrip,
     onClick: () -> Unit,
+    onShowLocation: () -> Unit,
     onStrip: () -> Unit,
     onSkip: () -> Unit,
 ) {
@@ -255,11 +302,15 @@ private fun PendingRow(
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    val time = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
-                        .format(Date(item.detectedAt))
+                    val fmt = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
                     val zone = item.zoneName?.let { " · $it" } ?: ""
+                    val primary = if (item.dateTakenMs > 0L) {
+                        "Taken ${fmt.format(Date(item.dateTakenMs))}$zone"
+                    } else {
+                        "Detected ${fmt.format(Date(item.detectedAt))}$zone"
+                    }
                     Text(
-                        "Detected $time$zone",
+                        primary,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -275,6 +326,8 @@ private fun PendingRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
             ) {
+                TextButton(onClick = onShowLocation) { Text("Location") }
+                Spacer(Modifier.width(4.dp))
                 TextButton(onClick = onSkip) { Text("Skip") }
                 Spacer(Modifier.width(4.dp))
                 TextButton(onClick = onStrip) { Text("Strip GPS") }

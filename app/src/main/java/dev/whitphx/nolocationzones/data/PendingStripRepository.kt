@@ -19,6 +19,7 @@ class PendingStripRepository(private val dao: PendingStripDao) {
                 displayName = item.displayName,
                 detectedAt = item.detectedAt,
                 zoneName = item.zoneName,
+                dateTakenMs = item.dateTakenMs,
             )
         )
     }
@@ -33,5 +34,6 @@ class PendingStripRepository(private val dao: PendingStripDao) {
             displayName = e.displayName,
             detectedAt = e.detectedAt,
             zoneName = e.zoneName,
+            dateTakenMs = e.dateTakenMs,
         )
 }

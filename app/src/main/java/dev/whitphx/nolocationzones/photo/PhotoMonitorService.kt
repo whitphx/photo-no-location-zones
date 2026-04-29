@@ -134,6 +134,7 @@ class PhotoMonitorService : LifecycleService() {
             MediaStore.Images.Media._ID,
             MediaStore.Images.Media.MIME_TYPE,
             MediaStore.Images.Media.DISPLAY_NAME,
+            MediaStore.Images.Media.DATE_TAKEN,
         )
         val selection = "${MediaStore.Images.Media._ID} > ? AND " +
             "(${MediaStore.Images.Media.MIME_TYPE} = 'image/jpeg' OR " +
@@ -157,6 +158,7 @@ class PhotoMonitorService : LifecycleService() {
         cursor.use { c ->
             val idCol = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
             val nameCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
+            val takenCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
             while (c.moveToNext()) {
                 val id = c.getLong(idCol)
                 if (id > maxSeen) maxSeen = id
@@ -172,6 +174,7 @@ class PhotoMonitorService : LifecycleService() {
                         displayName = c.getString(nameCol),
                         detectedAt = now,
                         zoneName = zoneName,
+                        dateTakenMs = if (c.isNull(takenCol)) 0L else c.getLong(takenCol),
                     )
                 )
                 Log.i(TAG, "Queued image $id for user review")

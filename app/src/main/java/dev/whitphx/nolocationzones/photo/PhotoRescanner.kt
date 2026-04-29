@@ -1,12 +1,10 @@
 package dev.whitphx.nolocationzones.photo
 
-import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.Context
 import android.location.Location
 import android.provider.MediaStore
 import android.util.Log
-import androidx.exifinterface.media.ExifInterface
 import dev.whitphx.nolocationzones.data.PendingStripRepository
 import dev.whitphx.nolocationzones.data.ZoneRepository
 import dev.whitphx.nolocationzones.domain.PendingStrip
@@ -55,6 +53,7 @@ class PhotoRescanner(
             MediaStore.Images.Media._ID,
             MediaStore.Images.Media.DISPLAY_NAME,
             MediaStore.Images.Media.MIME_TYPE,
+            MediaStore.Images.Media.DATE_TAKEN,
         )
         val mimeClause = "(${MediaStore.Images.Media.MIME_TYPE} = 'image/jpeg' OR " +
             "${MediaStore.Images.Media.MIME_TYPE} = 'image/heif' OR " +
@@ -81,11 +80,12 @@ class PhotoRescanner(
         cursor.use { c ->
             val idCol = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
             val nameCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
+            val takenCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
             while (c.moveToNext()) {
                 scanned++
                 val id = c.getLong(idCol)
                 val uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
-                val coords = readLatLong(resolver, uri)
+                val coords = ExifGpsReader.readLatLong(resolver, uri)
                 if (coords == null) {
                     noGps++
                     continue
@@ -99,6 +99,7 @@ class PhotoRescanner(
                         displayName = c.getString(nameCol),
                         detectedAt = now,
                         zoneName = zone.name,
+                        dateTakenMs = if (c.isNull(takenCol)) 0L else c.getLong(takenCol),
                     )
                 )
                 matched++
@@ -116,17 +117,6 @@ class PhotoRescanner(
             zonesAtScan = zones.size,
             daysBack = daysBack,
         )
-    }
-
-    private fun readLatLong(resolver: ContentResolver, uri: android.net.Uri): DoubleArray? {
-        return try {
-            resolver.openInputStream(uri)?.use { input ->
-                ExifInterface(input).getLatLong()
-            }
-        } catch (t: Throwable) {
-            Log.w(TAG, "readLatLong failed for $uri", t)
-            null
-        }
     }
 
     private fun zoneContaining(latitude: Double, longitude: Double, zones: List<Zone>): Zone? {

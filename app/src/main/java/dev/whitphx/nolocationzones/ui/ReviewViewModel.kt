@@ -11,7 +11,9 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.whitphx.nolocationzones.App
 import dev.whitphx.nolocationzones.data.PendingStripRepository
+import dev.whitphx.nolocationzones.data.ZoneRepository
 import dev.whitphx.nolocationzones.domain.PendingStrip
+import dev.whitphx.nolocationzones.domain.Zone
 import dev.whitphx.nolocationzones.photo.ExifGpsStripper
 import dev.whitphx.nolocationzones.photo.PhotoRescanner
 import kotlinx.coroutines.Dispatchers
@@ -19,9 +21,36 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+enum class SortBy(val label: String) {
+    DateTakenDesc("Date taken — newest first"),
+    DateTakenAsc("Date taken — oldest first"),
+    DetectedDesc("Recently detected first"),
+    DetectedAsc("First detected first"),
+    ZoneAsc("Zone name (A → Z)"),
+    ;
+
+    fun apply(items: List<PendingStrip>): List<PendingStrip> = when (this) {
+        DateTakenDesc -> items.sortedWith(
+            compareByDescending<PendingStrip> { it.dateTakenMs }.thenByDescending { it.detectedAt },
+        )
+        DateTakenAsc -> items.sortedWith(
+            compareBy<PendingStrip> { if (it.dateTakenMs == 0L) Long.MAX_VALUE else it.dateTakenMs }
+                .thenBy { it.detectedAt },
+        )
+        DetectedDesc -> items.sortedByDescending { it.detectedAt }
+        DetectedAsc -> items.sortedBy { it.detectedAt }
+        ZoneAsc -> {
+            val byZone: Comparator<PendingStrip> =
+                compareBy(nullsLast<String>()) { it.zoneName }
+            items.sortedWith(byZone.thenByDescending { it.dateTakenMs })
+        }
+    }
+}
 
 sealed interface ReviewEvent {
     /** Tell the activity to launch this PendingIntent via an IntentSenderRequest. */
@@ -41,9 +70,21 @@ class ReviewViewModel(application: Application) : AndroidViewModel(application) 
     private val app = application as App
     private val pendingRepo: PendingStripRepository = app.container.pendingStripRepository
     private val rescanner: PhotoRescanner = app.container.photoRescanner
+    private val zoneRepo: ZoneRepository = app.container.zoneRepository
+
+    private val _sortBy = MutableStateFlow(SortBy.DateTakenDesc)
+    val sortBy: StateFlow<SortBy> = _sortBy.asStateFlow()
+
+    fun setSortBy(value: SortBy) {
+        _sortBy.value = value
+    }
 
     val pending: StateFlow<List<PendingStrip>> =
-        pendingRepo.all.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        combine(pendingRepo.all, _sortBy) { items, sort -> sort.apply(items) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val zones: StateFlow<List<Zone>> =
+        zoneRepo.zones.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _events = MutableStateFlow<ReviewEvent?>(null)
     val events: StateFlow<ReviewEvent?> = _events.asStateFlow()

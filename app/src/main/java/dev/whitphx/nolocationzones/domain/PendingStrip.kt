@@ -8,4 +8,6 @@ data class PendingStrip(
     val displayName: String?,
     val detectedAt: Long,
     val zoneName: String?,
+    /** When the photo was taken (EXIF DateTimeOriginal in millis). 0 if unknown. */
+    val dateTakenMs: Long = 0L,
 )
