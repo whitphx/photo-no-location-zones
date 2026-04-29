@@ -30,6 +30,7 @@ import dev.whitphx.nolocationzones.data.PendingStripRepository
 import dev.whitphx.nolocationzones.data.ZoneRepository
 import dev.whitphx.nolocationzones.data.ZoneStateStore
 import dev.whitphx.nolocationzones.domain.PendingStrip
+// PendingStripReconciler is in the same package so no explicit import needed
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -57,6 +58,7 @@ class PhotoMonitorService : LifecycleService() {
     private lateinit var stateStore: ZoneStateStore
     private lateinit var zoneRepo: ZoneRepository
     private lateinit var pendingRepo: PendingStripRepository
+    private lateinit var reconciler: PendingStripReconciler
 
     private val mediaChanges = MutableSharedFlow<Unit>(extraBufferCapacity = 16)
 
@@ -72,6 +74,7 @@ class PhotoMonitorService : LifecycleService() {
         stateStore = app.container.zoneStateStore
         zoneRepo = app.container.zoneRepository
         pendingRepo = app.container.pendingStripRepository
+        reconciler = app.container.pendingStripReconciler
     }
 
     @OptIn(FlowPreview::class)
@@ -107,15 +110,21 @@ class PhotoMonitorService : LifecycleService() {
             }
         }
 
-        // MediaStore -> debounce -> scan + queue + per-photo notify
+        // MediaStore -> debounce -> reconcile (drop deleted) + scan-and-queue (pick up new)
         lifecycleScope.launch {
             mediaChanges.debounce(MEDIA_DEBOUNCE_MS).collect {
+                runCatching { reconciler.reconcile() }
+                    .onFailure { Log.w(TAG, "Reconcile failed", it) }
                 if (stateStore.isAnyZoneActive()) scanAndQueue()
             }
         }
 
-        // Initial scan in case photos appeared while the service was being started.
-        lifecycleScope.launch { if (stateStore.isAnyZoneActive()) scanAndQueue() }
+        // Initial pass: reconcile against any deletions that happened while we weren't running,
+        // then scan for new photos.
+        lifecycleScope.launch {
+            runCatching { reconciler.reconcile() }
+            if (stateStore.isAnyZoneActive()) scanAndQueue()
+        }
 
         return START_STICKY
     }

@@ -16,6 +16,7 @@ import dev.whitphx.nolocationzones.data.ZoneRepository
 import dev.whitphx.nolocationzones.domain.PendingStrip
 import dev.whitphx.nolocationzones.domain.Zone
 import dev.whitphx.nolocationzones.photo.ExifGpsStripper
+import dev.whitphx.nolocationzones.photo.PendingStripReconciler
 import dev.whitphx.nolocationzones.photo.PhotoActionReceiver
 import dev.whitphx.nolocationzones.photo.PhotoRescanner
 import kotlinx.coroutines.Dispatchers
@@ -73,6 +74,13 @@ class ReviewViewModel(application: Application) : AndroidViewModel(application) 
     private val pendingRepo: PendingStripRepository = app.container.pendingStripRepository
     private val rescanner: PhotoRescanner = app.container.photoRescanner
     private val zoneRepo: ZoneRepository = app.container.zoneRepository
+    private val reconciler: PendingStripReconciler = app.container.pendingStripReconciler
+
+    init {
+        // Drop entries whose underlying photo was deleted while the user was out of every zone
+        // (i.e. while the foreground service wasn't running and couldn't observe MediaStore).
+        viewModelScope.launch { runCatching { reconciler.reconcile() } }
+    }
 
     private val _sortBy = MutableStateFlow(SortBy.DateTakenDesc)
     val sortBy: StateFlow<SortBy> = _sortBy.asStateFlow()

@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -78,8 +78,8 @@ fun LocationPreviewDialog(
                 ) {
                     IconButton(onClick = onDismiss) {
                         Icon(
-                            Icons.Filled.Close,
-                            contentDescription = "Close",
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
                             tint = Color.White,
                         )
                     }

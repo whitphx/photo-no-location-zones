@@ -287,13 +287,23 @@ fun ReviewScreen(
     }
 
     preview?.let { item ->
-        PhotoPreviewDialog(
-            uri = item.contentUri,
-            displayName = item.displayName,
+        PhotoDetailDialog(
+            item = item,
             onDismiss = { preview = null },
+            onStrip = {
+                viewModel.requestStripOne(item.imageId)
+                preview = null
+            },
+            onShowLocation = { locationPreview = item },
+            onSkip = {
+                viewModel.skipOne(item.imageId)
+                preview = null
+            },
         )
     }
 
+    // Stacks on top of PhotoDetailDialog when launched from there. Dismissing it just unmounts
+    // this dialog; the detail dialog underneath remains visible.
     locationPreview?.let { item ->
         LocationPreviewDialog(
             uri = item.contentUri,
