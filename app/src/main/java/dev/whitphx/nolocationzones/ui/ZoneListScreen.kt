@@ -1,5 +1,6 @@
 package dev.whitphx.nolocationzones.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -50,6 +51,7 @@ import dev.whitphx.nolocationzones.domain.Zone
 fun ZoneListScreen(
     viewModel: MainViewModel,
     onAddZone: () -> Unit,
+    onEditZone: (Long) -> Unit,
     onReview: () -> Unit,
 ) {
     val items by viewModel.zoneList.collectAsStateWithLifecycle()
@@ -93,6 +95,7 @@ fun ZoneListScreen(
                 items(items, key = { it.zone.id }) { item ->
                     ZoneRow(
                         item = item,
+                        onClick = { onEditZone(item.zone.id) },
                         onDelete = { pendingDelete = item.zone },
                     )
                 }
@@ -130,7 +133,7 @@ private fun EmptyHint() {
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "Tap + to add a zone at your current location. Photos taken inside any zone will have their GPS metadata stripped.",
+                "Tap + to add a zone on the map. Photos taken inside any zone will have their GPS metadata stripped.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -139,9 +142,9 @@ private fun EmptyHint() {
 }
 
 @Composable
-private fun ZoneRow(item: ZoneListItem, onDelete: () -> Unit) {
+private fun ZoneRow(item: ZoneListItem, onClick: () -> Unit, onDelete: () -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         colors = if (item.isActive) {
             CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
         } else {

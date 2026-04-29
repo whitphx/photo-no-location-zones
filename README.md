@@ -14,10 +14,10 @@ The stock camera app still runs, which means computational-photography features 
                    ┌─────────────────────────────────────┐
                    │  Compose UI                          │
                    │  • ZoneListScreen + ReviewBanner     │
-                   │  • AddZoneScreen                     │
+                   │  • MapZoneScreen (create + edit)     │
                    │  • ReviewScreen (createWriteRequest) │
                    │  • PermissionsCard                   │
-                   │  • MainViewModel / ReviewViewModel   │
+                   │  • Main / MapZone / Review VMs       │
                    └──────────────┬──────────────────────┘
                                   │ creates / deletes zones
                                   ▼
@@ -116,7 +116,14 @@ Prerequisites:
 
 - JDK 17 (`brew install openjdk@17` on macOS)
 - Android SDK with `platforms/android-36` and `build-tools/36.0.0`
-- A device running Android 11 or newer with Google Play services (geofencing requires it)
+- A device running Android 11 or newer with Google Play services (geofencing and the map both require it)
+- A **Google Maps Android SDK API key** for the map-based zone editor. Create a project in the [Google Cloud Console](https://console.cloud.google.com/), enable *Maps SDK for Android*, generate an API key, and add it to `local.properties`:
+
+  ```properties
+  MAPS_API_KEY=AIza_your_key_here
+  ```
+
+  `local.properties` is gitignored. Without a key the app still builds and runs, but the map view will be blank — every other feature works fine. For a personal-use build, restrict the key to your app's package name + debug-signing SHA-1 fingerprint.
 
 ```sh
 ./gradlew :app:assembleDebug
@@ -129,7 +136,7 @@ First-run setup, in this order:
 2. Tap **Grant** on *Foreground location & photo access* — answer the system dialog with *While using the app*.
 3. Tap **Grant** on *Background location*. On Android 11+ this opens Settings; choose *Allow all the time*.
 4. Tap **Grant** on *Notifications* (Android 13+).
-5. Tap **+** to add your first zone — typically your home. The app reads your current location and lets you name it and set a radius (100 m – 5 km).
+5. Tap **+** to add your first zone. A map opens centered on your current location; tap anywhere else on the map to drop the pin elsewhere, drag the pin to fine-tune, set a name, adjust the radius (100 m – 5 km), and tap **Save**. To edit or delete an existing zone later, tap its row in the list to reopen the same screen.
 6. Take a test photo with the stock camera. Within a few seconds a "Photos waiting for review" notification appears.
 7. Tap the notification. The review screen lists the photo. Tap **Strip all**, and accept the system's *"Allow this app to modify these photos?"* dialog.
 8. Verify the result with any EXIF viewer — GPS tags should be absent.
@@ -150,7 +157,6 @@ First-run setup, in this order:
 
 ## Future work (deliberately out of MVP scope)
 
-- **Map-based zone editing.** Today zones can only be created at the user's current location. A map picker would allow creating zones for places the user is not currently at and dragging existing zones to refine them. Requires Google Maps SDK + an API key.
 - **Per-zone schedules.** "Strip GPS only on weekends at the office" — would require a small scheduler layered on top of the active-zone state.
 - **Video files.** Modifying GPS metadata in `.mp4` requires walking the `udta`/`gps0` boxes; ExifInterface only handles still images.
 - **Auto-strip option for a Play-Store version.** With `MediaStore.createWriteRequest()` you can pre-collect a session's worth of photos and submit one consent dialog at the moment of a UI-foreground event (e.g. when the user opens the camera app). The current MVP keeps the model deliberately simple: detect, queue, prompt-on-review.

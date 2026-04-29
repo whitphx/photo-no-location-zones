@@ -7,16 +7,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.whitphx.nolocationzones.App
 
 private sealed interface Screen {
     data object Home : Screen
-    data object AddZone : Screen
+    data class MapZone(val editId: Long?) : Screen
     data object Review : Screen
 }
 
-/** External signal: route to the Review screen on launch (e.g. notification tap). */
 class NavSignal {
     var openReviewOnce: Boolean = false
 }
@@ -32,21 +32,27 @@ fun AppNavHost(viewModel: MainViewModel, signal: NavSignal) {
         }
     }
 
-    when (screen) {
+    when (val current = screen) {
         Screen.Home -> ZoneListScreen(
             viewModel = viewModel,
-            onAddZone = { screen = Screen.AddZone },
+            onAddZone = { screen = Screen.MapZone(editId = null) },
+            onEditZone = { id -> screen = Screen.MapZone(editId = id) },
             onReview = { screen = Screen.Review },
         )
-        Screen.AddZone -> AddZoneScreen(
-            viewModel = viewModel,
-            onClose = {
-                viewModel.resetAddZone()
-                screen = Screen.Home
-            },
-        )
+        is Screen.MapZone -> {
+            val app = LocalContext.current.applicationContext as App
+            // Key by editId so the VM is recreated when navigating between different zones.
+            val mapVm: MapZoneViewModel = viewModel(
+                key = "MapZone:${current.editId ?: "new"}",
+                factory = MapZoneViewModel.factory(app, current.editId),
+            )
+            MapZoneScreen(
+                viewModel = mapVm,
+                onClose = { screen = Screen.Home },
+            )
+        }
         Screen.Review -> {
-            val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as App
+            val app = LocalContext.current.applicationContext as App
             val reviewVm: ReviewViewModel = viewModel(factory = ReviewViewModel.factory(app))
             ReviewScreen(
                 viewModel = reviewVm,
@@ -60,14 +66,14 @@ private val ScreenSaver = Saver<Screen, String>(
     save = {
         when (it) {
             Screen.Home -> "home"
-            Screen.AddZone -> "add"
+            is Screen.MapZone -> "map:${it.editId ?: ""}"
             Screen.Review -> "review"
         }
     },
     restore = {
-        when (it) {
-            "add" -> Screen.AddZone
-            "review" -> Screen.Review
+        when {
+            it == "review" -> Screen.Review
+            it.startsWith("map:") -> Screen.MapZone(it.removePrefix("map:").toLongOrNull())
             else -> Screen.Home
         }
     },
