@@ -214,25 +214,26 @@ fun HomeScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    // Whole title row is tappable so the dot is a usable target on mobile.
-                    // Tap → expand the zones sheet (the user's "where am I?" → "show zones").
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
+                    // Whole title block is tappable to expand the zones sheet.
+                    Column(
                         modifier = Modifier
                             .clip(RoundedCornerShape(20.dp))
                             .clickable(onClick = expandSheet)
                             .padding(horizontal = 8.dp, vertical = 4.dp),
                     ) {
-                        StatusIndicator(
-                            permissionsAllGranted = permissions.allGranted,
-                            activeZoneCount = zoneItems.count { it.isActive },
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = computeStatusTitle(zoneItems, permissions.allGranted),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            StatusIndicator(
+                                permissionsAllGranted = permissions.allGranted,
+                                activeZoneCount = zoneItems.count { it.isActive },
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = computeStatusTitle(zoneItems, permissions.allGranted),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                        if (permissions.allGranted) WatchingIndicator()
                     }
                 },
                 actions = {
@@ -608,8 +609,12 @@ private fun ZoneSheet(
                 "Zones",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f),
             )
+            if (zones.isNotEmpty()) {
+                Spacer(Modifier.width(8.dp))
+                ZoneCountBadge(count = zones.size)
+            }
+            Spacer(Modifier.weight(1f))
             IconButton(onClick = onAddZone) {
                 Icon(Icons.Filled.Add, contentDescription = "Add zone")
             }
@@ -637,6 +642,53 @@ private fun ZoneSheet(
                 item { Spacer(Modifier.height(24.dp)) }
             }
         }
+    }
+}
+
+/**
+ * Pill-shaped count badge showing how many zones exist in total. Lives next to the "Zones"
+ * title in the bottom-sheet header so the user can tell at a glance whether the peek-visible
+ * row is one of many — without having to drag the sheet up to find out.
+ */
+@Composable
+private fun ZoneCountBadge(count: Int) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shape = RoundedCornerShape(50),
+    ) {
+        Text(
+            text = count.toString(),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp),
+        )
+    }
+}
+
+/**
+ * Small "the app is actively watching for new photos" indicator. A subtitle on line 2 of the
+ * topbar title. Rendered only when permissions are all granted, since the foreground service
+ * can't actually run otherwise.
+ */
+@Composable
+private fun WatchingIndicator() {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(start = 22.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF2E7D32)),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            "Watching",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
