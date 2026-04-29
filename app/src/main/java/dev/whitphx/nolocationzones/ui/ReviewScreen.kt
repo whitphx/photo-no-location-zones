@@ -23,13 +23,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BrokenImage
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -39,6 +39,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -194,13 +195,13 @@ fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
                 )
             },
             confirmButton = {
-                androidx.compose.material3.TextButton(onClick = {
+                TextButton(onClick = {
                     viewModel.skipAll()
                     skipAllConfirm = false
                 }) { Text("Skip all") }
             },
             dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { skipAllConfirm = false }) {
+                TextButton(onClick = { skipAllConfirm = false }) {
                     Text("Cancel")
                 }
             },
@@ -265,8 +266,8 @@ private fun PendingRow(item: PendingStrip, onClick: () -> Unit, onSkip: () -> Un
                 )
             }
             Spacer(Modifier.width(8.dp))
-            IconButton(onClick = onSkip) {
-                Icon(Icons.Filled.Close, contentDescription = "Skip this photo")
+            TextButton(onClick = onSkip) {
+                Text("Skip")
             }
         }
     }
@@ -308,9 +309,7 @@ private fun RescanCard(rescanning: Boolean, onRescan: (Int) -> Unit) {
                 }
                 if (rescanning) {
                     Spacer(Modifier.width(12.dp))
-                    androidx.compose.material3.CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                    )
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
                 }
             }
             Spacer(Modifier.height(8.dp))
