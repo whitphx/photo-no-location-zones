@@ -27,7 +27,13 @@ sealed interface ReviewEvent {
     /** Tell the activity to launch this PendingIntent via an IntentSenderRequest. */
     data class RequestWriteAccess(val intent: PendingIntent, val targetIds: List<Long>) : ReviewEvent
     data class StripCompleted(val stripped: Int, val skipped: Int, val failed: Int) : ReviewEvent
-    data class RescanCompleted(val matched: Int, val scanned: Int, val zonesAtScan: Int) : ReviewEvent
+    data class RescanCompleted(
+        val matched: Int,
+        val scanned: Int,
+        val noGps: Int,
+        val zonesAtScan: Int,
+        val daysBack: Int,
+    ) : ReviewEvent
     data class Error(val message: String) : ReviewEvent
 }
 
@@ -129,7 +135,13 @@ class ReviewViewModel(application: Application) : AndroidViewModel(application) 
             _rescanning.value = true
             try {
                 val r = rescanner.rescanRecent(daysBack)
-                _events.value = ReviewEvent.RescanCompleted(r.matched, r.scanned, r.zonesAtScan)
+                _events.value = ReviewEvent.RescanCompleted(
+                    matched = r.matched,
+                    scanned = r.scanned,
+                    noGps = r.noGps,
+                    zonesAtScan = r.zonesAtScan,
+                    daysBack = r.daysBack,
+                )
             } catch (t: Throwable) {
                 _events.value = ReviewEvent.Error(t.message ?: "Rescan failed")
             } finally {

@@ -27,6 +27,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -55,6 +57,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.whitphx.nolocationzones.domain.PendingStrip
+import dev.whitphx.nolocationzones.photo.PhotoRescanner
 import java.text.DateFormat
 import java.util.Date
 
@@ -98,10 +101,14 @@ fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
                 viewModel.consumeEvent()
             }
             is ReviewEvent.RescanCompleted -> {
+                val window = if (e.daysBack == PhotoRescanner.DAYS_BACK_ALL) "all photos"
+                else "last ${e.daysBack}d"
                 val msg = when {
                     e.zonesAtScan == 0 -> "Add a zone first — nothing to scan against."
-                    e.matched == 0 -> "Scanned ${e.scanned} recent photos — none taken inside a zone."
-                    else -> "Found ${e.matched} photo${if (e.matched == 1) "" else "s"} taken inside a zone."
+                    e.matched == 0 -> "Scanned ${e.scanned} ($window): ${e.noGps} have no GPS, " +
+                        "${e.scanned - e.noGps} have GPS but none fall inside a zone."
+                    else -> "Found ${e.matched} of ${e.scanned} ($window) — " +
+                        "${e.noGps} skipped because they have no GPS."
                 }
                 snackbar.showSnackbar(msg)
                 viewModel.consumeEvent()
@@ -125,10 +132,10 @@ fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
                 },
                 actions = {
                     IconButton(
-                        onClick = { viewModel.rescan() },
+                        onClick = { viewModel.rescan(PhotoRescanner.DEFAULT_DAYS_BACK) },
                         enabled = !rescanning,
                     ) {
-                        Icon(Icons.Filled.Refresh, contentDescription = "Rescan past photos")
+                        Icon(Icons.Filled.Refresh, contentDescription = "Rescan last 30 days")
                     }
                 },
             )
@@ -139,7 +146,7 @@ fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
             modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
         ) {
             Spacer(Modifier.height(8.dp))
-            RescanCard(rescanning = rescanning, onRescan = { viewModel.rescan() })
+            RescanCard(rescanning = rescanning, onRescan = { viewModel.rescan(it) })
             Spacer(Modifier.height(8.dp))
             if (items.isEmpty()) {
                 EmptyHint(modifier = Modifier.weight(1f))
@@ -282,36 +289,54 @@ private fun EmptyHint(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun RescanCard(rescanning: Boolean, onRescan: () -> Unit) {
+private fun RescanCard(rescanning: Boolean, onRescan: (Int) -> Unit) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    "Rescan past photos",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    "Walks the last 30 days of photos and re-queues any whose own GPS data " +
-                        "places them inside one of your zones — useful for recovering skipped " +
-                        "items or pulling in older photos.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Rescan past photos",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "Re-queues any photo whose EXIF GPS places it inside one of your zones. " +
+                            "Pick a window — older photos take longer.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (rescanning) {
+                    Spacer(Modifier.width(12.dp))
+                    androidx.compose.material3.CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                    )
+                }
             }
-            Spacer(Modifier.width(12.dp))
-            if (rescanning) {
-                androidx.compose.material3.CircularProgressIndicator(
-                    modifier = Modifier.size(28.dp),
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                RescanChip(label = "30d", days = 30, enabled = !rescanning, onRescan = onRescan)
+                RescanChip(label = "90d", days = 90, enabled = !rescanning, onRescan = onRescan)
+                RescanChip(label = "1y", days = 365, enabled = !rescanning, onRescan = onRescan)
+                RescanChip(
+                    label = "All",
+                    days = PhotoRescanner.DAYS_BACK_ALL,
+                    enabled = !rescanning,
+                    onRescan = onRescan,
                 )
-            } else {
-                OutlinedButton(onClick = onRescan) { Text("Rescan") }
             }
         }
     }
+}
+
+@Composable
+private fun RescanChip(label: String, days: Int, enabled: Boolean, onRescan: (Int) -> Unit) {
+    AssistChip(
+        onClick = { onRescan(days) },
+        label = { Text(label) },
+        enabled = enabled,
+        colors = AssistChipDefaults.assistChipColors(),
+    )
 }
 
 @Composable
