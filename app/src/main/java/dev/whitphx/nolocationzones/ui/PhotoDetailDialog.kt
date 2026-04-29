@@ -10,8 +10,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
@@ -20,8 +23,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.PrimaryTabRow
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -57,26 +58,39 @@ import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.util.Date
 
-enum class PhotoDetailTab { Photo, Location }
+/** Hint to [PhotoDetailDialog] which section the user came in for. The dialog stacks both
+ *  panes regardless; the value just decides whether to start at the top (photo) or scrolled
+ *  down to the map. */
+enum class PhotoDetailFocus { Photo, Location }
 
 /**
- * Full-screen dialog showing both the photo and its EXIF location on a single page, switchable
- * via tabs. Bottom action row carries the same Skip / Strip GPS controls as the in-list row.
+ * Full-screen dialog showing the photo and its EXIF-derived location stacked on a single page.
+ * Photo on top (capped height so portrait shots don't dominate the screen), then the map below
+ * with the user's zones overlaid. Skip / Strip GPS pinned at the bottom.
  *
- * Replaces the previous pair of separately-stacked dialogs (PhotoPreviewDialog +
- * LocationPreviewDialog). Notification "Show location" deep-links open this dialog with
- * [initialTab] = [PhotoDetailTab.Location].
+ * The [initialFocus] argument is purely a scroll hint: if the user came in via the "Location"
+ * action, we auto-scroll to the map; otherwise we stay at the top.
  */
 @Composable
 fun PhotoDetailDialog(
     item: PendingStrip,
     zones: List<Zone>,
-    initialTab: PhotoDetailTab = PhotoDetailTab.Photo,
+    initialFocus: PhotoDetailFocus = PhotoDetailFocus.Photo,
     onDismiss: () -> Unit,
     onStrip: () -> Unit,
     onSkip: () -> Unit,
 ) {
-    var selectedTab by remember(item.imageId) { mutableStateOf(initialTab) }
+    val scrollState = rememberScrollState()
+
+    LaunchedEffect(item.imageId, initialFocus) {
+        if (initialFocus == PhotoDetailFocus.Location) {
+            // Wait for layout to know the scroll bounds, then jump to the map (which lives at
+            // the bottom of the scrollable column). Polling is acceptable here — content is
+            // small and the wait is one or two frames.
+            while (scrollState.maxValue == 0) kotlinx.coroutines.yield()
+            scrollState.animateScrollTo(scrollState.maxValue)
+        }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -90,35 +104,18 @@ fun PhotoDetailDialog(
             Column(modifier = Modifier.fillMaxSize()) {
                 Header(item = item, onDismiss = onDismiss)
 
-                PrimaryTabRow(
-                    selectedTabIndex = selectedTab.ordinal,
-                    containerColor = Color.Transparent,
-                    contentColor = Color.White,
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .verticalScroll(scrollState)
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    Tab(
-                        selected = selectedTab == PhotoDetailTab.Photo,
-                        onClick = { selectedTab = PhotoDetailTab.Photo },
-                        text = { Text("Photo") },
-                        selectedContentColor = Color.White,
-                        unselectedContentColor = Color.White.copy(alpha = 0.6f),
-                    )
-                    Tab(
-                        selected = selectedTab == PhotoDetailTab.Location,
-                        onClick = { selectedTab = PhotoDetailTab.Location },
-                        text = { Text("Location") },
-                        selectedContentColor = Color.White,
-                        unselectedContentColor = Color.White.copy(alpha = 0.6f),
-                    )
-                }
-
-                Box(
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    when (selectedTab) {
-                        PhotoDetailTab.Photo -> PhotoPane(item = item)
-                        PhotoDetailTab.Location -> LocationPane(item = item, zones = zones)
-                    }
+                    Spacer(Modifier.height(8.dp))
+                    PhotoPane(item = item)
+                    LocationPane(item = item, zones = zones)
+                    Spacer(Modifier.height(8.dp))
                 }
 
                 Row(
@@ -183,15 +180,22 @@ private fun PhotoPane(item: PendingStrip) {
         maxOf(config.screenWidthDp.dp.roundToPx(), config.screenHeightDp.dp.roundToPx())
     }
     val bitmap = rememberPhotoBitmap(item.contentUri, sizePx)
-    if (bitmap != null) {
-        Image(
-            bitmap = bitmap,
-            contentDescription = null,
-            contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp),
-        )
-    } else {
-        CircularProgressIndicator(color = Color.White)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 200.dp, max = 480.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap,
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            CircularProgressIndicator(color = Color.White)
+        }
     }
 }
 
@@ -208,37 +212,47 @@ private fun LocationPane(item: PendingStrip, zones: List<Zone>) {
         loaded = true
     }
 
-    when {
-        !loaded -> CircularProgressIndicator(color = Color.White)
-        coords == null -> Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Text(
-                "No GPS data on this photo.",
-                color = Color.White,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Spacer(Modifier.size(4.dp))
-            Text(
-                "Either it never had any, or it has already been stripped.",
-                color = Color.White.copy(alpha = 0.75f),
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-        else -> Column(modifier = Modifier.fillMaxSize()) {
-            Text(
-                text = "${"%.6f".format(coords!![0])}, ${"%.6f".format(coords!![1])}",
-                color = Color.White.copy(alpha = 0.85f),
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-            )
-            MapBody(
-                lat = coords!![0],
-                lon = coords!![1],
-                zones = zones,
-                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 4.dp),
-            )
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "Location",
+            color = Color.White,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.height(4.dp))
+        when {
+            !loaded -> Box(
+                modifier = Modifier.fillMaxWidth().height(120.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(color = Color.White)
+            }
+            coords == null -> Column {
+                Text(
+                    "No GPS data on this photo.",
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    "Either it never had any, or it has already been stripped.",
+                    color = Color.White.copy(alpha = 0.75f),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            else -> {
+                Text(
+                    text = "${"%.6f".format(coords!![0])}, ${"%.6f".format(coords!![1])}",
+                    color = Color.White.copy(alpha = 0.85f),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(Modifier.height(8.dp))
+                MapBody(
+                    lat = coords!![0],
+                    lon = coords!![1],
+                    zones = zones,
+                    modifier = Modifier.fillMaxWidth().height(320.dp),
+                )
+            }
         }
     }
 }

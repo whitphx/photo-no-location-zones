@@ -84,7 +84,7 @@ fun ReviewScreen(
 
     var pendingTargetIds by remember { mutableStateOf<List<Long>>(emptyList()) }
     var preview: PendingStrip? by remember { mutableStateOf(null) }
-    var previewTab: PhotoDetailTab by remember { mutableStateOf(PhotoDetailTab.Photo) }
+    var previewFocus: PhotoDetailFocus by remember { mutableStateOf(PhotoDetailFocus.Photo) }
     var skipAllConfirm by remember { mutableStateOf(false) }
     var sortMenuOpen by remember { mutableStateOf(false) }
     val zones by viewModel.zones.collectAsStateWithLifecycle()
@@ -160,7 +160,7 @@ fun ReviewScreen(
                     detectedAt = System.currentTimeMillis(),
                     zoneName = null,
                 )
-                previewTab = PhotoDetailTab.Location
+                previewFocus = PhotoDetailFocus.Location
                 onActionConsumed()
             }
             null -> Unit
@@ -238,11 +238,11 @@ fun ReviewScreen(
                             item = item,
                             onClick = {
                                 preview = item
-                                previewTab = PhotoDetailTab.Photo
+                                previewFocus = PhotoDetailFocus.Photo
                             },
                             onShowLocation = {
                                 preview = item
-                                previewTab = PhotoDetailTab.Location
+                                previewFocus = PhotoDetailFocus.Location
                             },
                             onStrip = { viewModel.requestStripOne(item.imageId) },
                             onSkip = { viewModel.skipOne(item.imageId) },
@@ -297,7 +297,7 @@ fun ReviewScreen(
         PhotoDetailDialog(
             item = item,
             zones = zones,
-            initialTab = previewTab,
+            initialFocus = previewFocus,
             onDismiss = { preview = null },
             onStrip = {
                 viewModel.requestStripOne(item.imageId)
