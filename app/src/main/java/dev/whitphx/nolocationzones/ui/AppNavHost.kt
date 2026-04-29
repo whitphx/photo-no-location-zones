@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -27,16 +28,20 @@ sealed interface PendingAction {
 /**
  * One-shot signals passed from MainActivity into Compose. Each field is read-then-cleared by the
  * receiver, so a single intent only triggers one navigation/action.
+ *
+ * Backed by [mutableStateOf] so writes from `Activity.onNewIntent` are visible to the snapshot
+ * system — without this, mutating a plain `var` from outside composition does not invalidate
+ * any reader, and the [LaunchedEffect] in [AppNavHost] never re-fires.
  */
 class NavSignal {
-    var openReviewOnce: Boolean = false
-    var pendingAction: PendingAction? = null
+    var openReviewOnce: Boolean by mutableStateOf(false)
+    var pendingAction: PendingAction? by mutableStateOf(null)
 }
 
 @Composable
 fun AppNavHost(viewModel: MainViewModel, signal: NavSignal) {
     var screen: Screen by rememberSaveable(stateSaver = ScreenSaver) { mutableStateOf(Screen.Home) }
-    var actionForReview: PendingAction? by androidx.compose.runtime.remember { mutableStateOf(null) }
+    var actionForReview: PendingAction? by remember { mutableStateOf(null) }
 
     LaunchedEffect(signal.openReviewOnce, signal.pendingAction) {
         if (signal.openReviewOnce) {
