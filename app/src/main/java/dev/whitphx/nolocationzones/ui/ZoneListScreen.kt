@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -53,16 +54,25 @@ fun ZoneListScreen(
     onAddZone: () -> Unit,
     onEditZone: (Long) -> Unit,
     onReview: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val items by viewModel.zoneList.collectAsStateWithLifecycle()
     val pendingCount by viewModel.pendingCount.collectAsStateWithLifecycle()
+    val permissions by rememberPermissionState()
     var pendingDelete: Zone? by remember { mutableStateOf(null) }
 
     Scaffold(
         topBar = {
-            TopAppBar(title = {
-                Text(stringResourceCompat(R.string.app_name), fontWeight = FontWeight.SemiBold)
-            })
+            TopAppBar(
+                title = {
+                    Text(stringResourceCompat(R.string.app_name), fontWeight = FontWeight.SemiBold)
+                },
+                actions = {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
+                    }
+                },
+            )
         },
         floatingActionButton = {
             FloatingActionButton(onClick = onAddZone) {
@@ -75,8 +85,16 @@ fun ZoneListScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item { Spacer(Modifier.height(8.dp)) }
-            item { ReviewBanner(count = pendingCount, onClick = onReview) }
-            item { PermissionsCard(onAllGranted = { viewModel.resyncGeofences() }) }
+            item {
+                StatusCard(
+                    permissionsAllGranted = permissions.allGranted,
+                    activeZoneName = items.firstOrNull { it.isActive }?.zone?.name,
+                    activeZoneCount = items.count { it.isActive },
+                    pendingCount = pendingCount,
+                    onOpenSettings = onOpenSettings,
+                    onOpenReview = onReview,
+                )
+            }
             item {
                 Spacer(Modifier.height(8.dp))
                 Text(
@@ -86,9 +104,7 @@ fun ZoneListScreen(
                 )
             }
             if (items.isEmpty()) {
-                item {
-                    EmptyHint()
-                }
+                item { EmptyHint() }
             } else {
                 items(items, key = { it.zone.id }) { item ->
                     ZoneRow(
@@ -118,6 +134,97 @@ fun ZoneListScreen(
             },
         )
     }
+}
+
+/**
+ * The single source of "what's happening right now" for the user. Picks the most actionable
+ * message based on permission, location, and pending-photo state. Always tappable; the tap
+ * target points at whichever screen would help.
+ *
+ * Priority (highest first): missing permissions → pending review → inside a zone → idle.
+ */
+@Composable
+private fun StatusCard(
+    permissionsAllGranted: Boolean,
+    activeZoneName: String?,
+    activeZoneCount: Int,
+    pendingCount: Int,
+    onOpenSettings: () -> Unit,
+    onOpenReview: () -> Unit,
+) {
+    val active = !permissionsAllGranted || pendingCount > 0 || activeZoneCount > 0
+    val containerColor = if (active) {
+        MaterialTheme.colorScheme.tertiaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant
+    }
+    val onClick: () -> Unit = when {
+        !permissionsAllGranted -> onOpenSettings
+        else -> onOpenReview
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+        onClick = onClick,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Filled.LocationOn,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(24.dp),
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                val (title, subtitle) = computeStatusText(
+                    permissionsAllGranted = permissionsAllGranted,
+                    activeZoneName = activeZoneName,
+                    activeZoneCount = activeZoneCount,
+                    pendingCount = pendingCount,
+                )
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+private fun computeStatusText(
+    permissionsAllGranted: Boolean,
+    activeZoneName: String?,
+    activeZoneCount: Int,
+    pendingCount: Int,
+): Pair<String, String> = when {
+    !permissionsAllGranted ->
+        "Setup needed" to "Tap to grant the remaining permissions in Settings."
+    pendingCount > 0 && activeZoneCount > 0 -> {
+        val zone = activeZoneName ?: "a zone"
+        "Inside $zone — $pendingCount photo${if (pendingCount == 1) "" else "s"} pending" to
+            "Tap to review and authorize the GPS strip."
+    }
+    pendingCount > 0 ->
+        "$pendingCount photo${if (pendingCount == 1) "" else "s"} waiting for review" to
+            "Tap to authorize the GPS strip."
+    activeZoneCount > 0 -> {
+        val zone = activeZoneName ?: "a zone"
+        "Inside $zone" to
+            "Monitoring is active. New GPS-tagged photos will be queued."
+    }
+    else ->
+        "Monitoring ready" to
+            "Outside all zones. Tap to rescan past photos."
 }
 
 @Composable
@@ -192,59 +299,6 @@ private fun ActiveBadge(active: Boolean) {
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
         )
-    }
-}
-
-@Composable
-private fun ReviewBanner(count: Int, onClick: () -> Unit) {
-    val active = count > 0
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = if (active) {
-            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
-        } else {
-            CardDefaults.cardColors()
-        },
-        onClick = onClick,
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                Icons.Filled.LocationOn,
-                contentDescription = null,
-                tint = if (active) MaterialTheme.colorScheme.onTertiaryContainer
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(24.dp),
-            )
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                if (active) {
-                    Text(
-                        "$count photo${if (count == 1) "" else "s"} waiting for review",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        "Tap to authorize the GPS strip.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    Text(
-                        "Review queue is empty",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        "Tap to rescan past photos for ones taken inside a zone.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
     }
 }
 

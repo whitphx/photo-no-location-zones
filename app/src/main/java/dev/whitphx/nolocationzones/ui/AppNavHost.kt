@@ -17,6 +17,7 @@ private sealed interface Screen {
     data object Home : Screen
     data class MapZone(val editId: Long?) : Screen
     data object Review : Screen
+    data object Settings : Screen
 }
 
 /** A specific action that should fire on the review screen on next composition (e.g. delivered
@@ -69,6 +70,11 @@ fun AppNavHost(viewModel: MainViewModel, signal: NavSignal) {
             onAddZone = { screen = Screen.MapZone(editId = null) },
             onEditZone = { id -> screen = Screen.MapZone(editId = id) },
             onReview = { screen = Screen.Review },
+            onOpenSettings = { screen = Screen.Settings },
+        )
+        Screen.Settings -> SettingsScreen(
+            onResyncGeofences = { viewModel.resyncGeofences() },
+            onClose = { screen = Screen.Home },
         )
         is Screen.MapZone -> {
             val app = LocalContext.current.applicationContext as App
@@ -100,11 +106,13 @@ private val ScreenSaver = Saver<Screen, String>(
             Screen.Home -> "home"
             is Screen.MapZone -> "map:${it.editId ?: ""}"
             Screen.Review -> "review"
+            Screen.Settings -> "settings"
         }
     },
     restore = {
         when {
             it == "review" -> Screen.Review
+            it == "settings" -> Screen.Settings
             it.startsWith("map:") -> Screen.MapZone(it.removePrefix("map:").toLongOrNull())
             else -> Screen.Home
         }
