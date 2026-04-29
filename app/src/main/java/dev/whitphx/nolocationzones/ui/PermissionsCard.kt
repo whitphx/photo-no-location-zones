@@ -75,6 +75,7 @@ fun PermissionsCard(onAllGranted: () -> Unit) {
 
             PermissionRow(
                 label = "Foreground location & photo access",
+                hint = "Reads your current location when you create a zone, sees new photos as they appear, and lets us check existing GPS metadata so we know which photos to queue.",
                 granted = state.fineLocation && state.readImages && state.mediaLocation,
                 onClick = {
                     val perms = mutableListOf(
@@ -92,6 +93,7 @@ fun PermissionsCard(onAllGranted: () -> Unit) {
 
             PermissionRow(
                 label = "Background location",
+                hint = "Lets the OS wake the app when you cross a zone boundary. Without it, geofence events stop firing as soon as you close the app.",
                 granted = state.backgroundLocation,
                 enabled = state.fineLocation,
                 onClick = { backgroundLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) },
@@ -100,6 +102,7 @@ fun PermissionsCard(onAllGranted: () -> Unit) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 PermissionRow(
                     label = "Notifications",
+                    hint = "Shows the 'inside zone' status while monitoring, and the alert when photos are waiting for your authorization.",
                     granted = state.postNotifications,
                     onClick = { notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
                 )
@@ -111,31 +114,31 @@ fun PermissionsCard(onAllGranted: () -> Unit) {
 @Composable
 private fun PermissionRow(
     label: String,
+    hint: String,
     granted: Boolean,
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        verticalAlignment = Alignment.Top,
     ) {
-        if (granted) {
-            Icon(
-                Icons.Filled.CheckCircle,
-                contentDescription = "Granted",
-                tint = Color(0xFF2E7D32),
-                modifier = Modifier.size(20.dp),
-            )
-        } else {
-            Icon(
-                Icons.Outlined.RadioButtonUnchecked,
-                contentDescription = "Not granted",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp),
+        Icon(
+            imageVector = if (granted) Icons.Filled.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+            contentDescription = if (granted) "Granted" else "Not granted",
+            tint = if (granted) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp).padding(top = 2.dp),
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                hint,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Spacer(Modifier.width(12.dp))
-        Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.width(12.dp))
         if (!granted) {
             OutlinedButton(onClick = onClick, enabled = enabled) { Text("Grant") }
