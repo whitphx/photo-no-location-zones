@@ -1,0 +1,700 @@
+package dev.whitphx.nolocationzones.ui
+
+import android.content.ContentUris
+import android.provider.MediaStore
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Sort
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BrokenImage
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Circle
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BottomSheetScaffold
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberBottomSheetScaffoldState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.whitphx.nolocationzones.domain.PendingStrip
+import dev.whitphx.nolocationzones.domain.Zone
+import dev.whitphx.nolocationzones.photo.PhotoRescanner
+import java.text.DateFormat
+import java.util.Date
+
+/**
+ * Single primary screen the user sees on launch:
+ *
+ *  - **Header**: status indicator (which zones the user is currently inside) + Settings.
+ *  - **Main area**: pending photo list when permissions are granted, otherwise the
+ *    [PermissionsCard] in its place. An empty hint when permissions are granted but no photos
+ *    are queued.
+ *  - **Footer**: condensed zone list, with `+` in its own header to add a zone. (Replaces the
+ *    old global FAB — adding zones is occasional setup, not a daily action.)
+ *
+ * This screen merges what used to be split across `ZoneListScreen` (Home) and `ReviewScreen`
+ * (a separate top-level destination) into one.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HomeScreen(
+    mainViewModel: MainViewModel,
+    reviewViewModel: ReviewViewModel,
+    pendingAction: PendingAction? = null,
+    onActionConsumed: () -> Unit = {},
+    onAddZone: () -> Unit,
+    onEditZone: (Long) -> Unit,
+    onOpenSettings: () -> Unit,
+) {
+    val zoneItems by mainViewModel.zoneList.collectAsStateWithLifecycle()
+    val items by reviewViewModel.pending.collectAsStateWithLifecycle()
+    val event by reviewViewModel.events.collectAsState()
+    val rescanning by reviewViewModel.rescanning.collectAsStateWithLifecycle()
+    val sortBy by reviewViewModel.sortBy.collectAsStateWithLifecycle()
+    val mapZones by reviewViewModel.zones.collectAsStateWithLifecycle()
+    val permissions by rememberPermissionState()
+    val snackbar = remember { SnackbarHostState() }
+
+    var pendingTargetIds by remember { mutableStateOf<List<Long>>(emptyList()) }
+    var preview: PendingStrip? by remember { mutableStateOf(null) }
+    var skipAllConfirm by remember { mutableStateOf(false) }
+    var pendingDelete: Zone? by remember { mutableStateOf(null) }
+    var sortMenuOpen by remember { mutableStateOf(false) }
+    var rescanMenuOpen by remember { mutableStateOf(false) }
+
+    val writeAccessLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            reviewViewModel.onWriteGranted(pendingTargetIds)
+        } else {
+            reviewViewModel.onWriteDenied()
+        }
+        pendingTargetIds = emptyList()
+    }
+
+    LaunchedEffect(event) {
+        when (val e = event) {
+            is ReviewEvent.RequestWriteAccess -> {
+                pendingTargetIds = e.targetIds
+                writeAccessLauncher.launch(IntentSenderRequest.Builder(e.intent.intentSender).build())
+                reviewViewModel.consumeEvent()
+            }
+            is ReviewEvent.StripCompleted -> {
+                val parts = buildList {
+                    if (e.stripped > 0) add("${e.stripped} stripped")
+                    if (e.skipped > 0) add("${e.skipped} already clean")
+                    if (e.failed > 0) add("${e.failed} failed")
+                }
+                snackbar.showSnackbar(parts.joinToString(", ").ifEmpty { "No changes" })
+                reviewViewModel.consumeEvent()
+            }
+            is ReviewEvent.RescanCompleted -> {
+                val window = if (e.daysBack == PhotoRescanner.DAYS_BACK_ALL) "all photos"
+                else "last ${e.daysBack}d"
+                val msg = when {
+                    e.zonesAtScan == 0 -> "Add a zone first — nothing to scan against."
+                    e.matched == 0 -> "Scanned ${e.scanned} ($window): ${e.noGps} have no GPS, " +
+                        "${e.scanned - e.noGps} have GPS but none fall inside a zone."
+                    else -> "Found ${e.matched} of ${e.scanned} ($window) — " +
+                        "${e.noGps} skipped because they have no GPS."
+                }
+                snackbar.showSnackbar(msg)
+                reviewViewModel.consumeEvent()
+            }
+            is ReviewEvent.Error -> {
+                snackbar.showSnackbar(e.message)
+                reviewViewModel.consumeEvent()
+            }
+            null -> Unit
+        }
+    }
+
+    // Notification deep-links: react to pendingAction once. ShowLocation builds a synthetic
+    // PendingStrip if the queue entry is gone (already skipped/stripped) so the dialog still
+    // opens against the underlying file.
+    LaunchedEffect(pendingAction, items) {
+        when (val action = pendingAction) {
+            is PendingAction.StripPhoto -> {
+                reviewViewModel.requestStripOne(action.imageId)
+                onActionConsumed()
+            }
+            is PendingAction.ShowLocation -> {
+                val existing = items.firstOrNull { it.imageId == action.imageId }
+                preview = existing ?: PendingStrip(
+                    imageId = action.imageId,
+                    contentUri = ContentUris.withAppendedId(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                        action.imageId,
+                    ),
+                    displayName = null,
+                    detectedAt = System.currentTimeMillis(),
+                    zoneName = null,
+                )
+                onActionConsumed()
+            }
+            null -> Unit
+        }
+    }
+
+    val sheetState = rememberBottomSheetScaffoldState()
+
+    BottomSheetScaffold(
+        scaffoldState = sheetState,
+        sheetPeekHeight = SHEET_PEEK_HEIGHT,
+        sheetContent = {
+            ZoneSheet(
+                zones = zoneItems,
+                onAddZone = onAddZone,
+                onEditZone = onEditZone,
+                onDeleteZone = { pendingDelete = it },
+            )
+        },
+        topBar = {
+            TopAppBar(
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        StatusIndicator(
+                            permissionsAllGranted = permissions.allGranted,
+                            activeZoneCount = zoneItems.count { it.isActive },
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = computeStatusTitle(zoneItems, permissions.allGranted),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                },
+                actions = {
+                    if (items.isNotEmpty()) {
+                        IconButton(onClick = { sortMenuOpen = true }) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Sort,
+                                contentDescription = "Sort photos",
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = sortMenuOpen,
+                            onDismissRequest = { sortMenuOpen = false },
+                        ) {
+                            SortBy.entries.forEach { option ->
+                                DropdownMenuItem(
+                                    text = { Text(option.label) },
+                                    leadingIcon = if (option == sortBy) {
+                                        { Icon(Icons.Filled.Check, contentDescription = null) }
+                                    } else null,
+                                    onClick = {
+                                        reviewViewModel.setSortBy(option)
+                                        sortMenuOpen = false
+                                    },
+                                )
+                            }
+                        }
+                    }
+
+                    IconButton(
+                        onClick = { rescanMenuOpen = true },
+                        enabled = !rescanning,
+                    ) {
+                        Icon(Icons.Filled.Refresh, contentDescription = "Rescan past photos")
+                    }
+                    DropdownMenu(
+                        expanded = rescanMenuOpen,
+                        onDismissRequest = { rescanMenuOpen = false },
+                    ) {
+                        Text(
+                            "Rescan past photos",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                        listOf(
+                            "Last 30 days" to 30,
+                            "Last 90 days" to 90,
+                            "Last year" to 365,
+                            "All time" to PhotoRescanner.DAYS_BACK_ALL,
+                        ).forEach { (label, days) ->
+                            DropdownMenuItem(
+                                text = { Text(label) },
+                                onClick = {
+                                    reviewViewModel.rescan(days)
+                                    rescanMenuOpen = false
+                                },
+                            )
+                        }
+                    }
+
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
+                    }
+                },
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbar) },
+    ) { padding ->
+        // The bottom-sheet's peek covers the bottom [SHEET_PEEK_HEIGHT] of the screen, so the
+        // main content gets explicit bottom padding to keep the action row above the peek.
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(bottom = SHEET_PEEK_HEIGHT),
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            ) {
+                when {
+                    !permissions.allGranted -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp),
+                        ) {
+                            Spacer(Modifier.height(16.dp))
+                            PermissionsCard(onAllGranted = { mainViewModel.resyncGeofences() })
+                        }
+                    }
+                    items.isEmpty() -> EmptyPhotoListHint(
+                        rescanning = rescanning,
+                        onRescan = { reviewViewModel.rescan(PhotoRescanner.DEFAULT_DAYS_BACK) },
+                    )
+                    else -> {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            item { Spacer(Modifier.height(8.dp)) }
+                            if (rescanning) item { RescanProgressRow() }
+                            items(items, key = { it.imageId }) { item ->
+                                PendingRow(
+                                    item = item,
+                                    onClick = { preview = item },
+                                    onShowLocation = { preview = item },
+                                    onStrip = { reviewViewModel.requestStripOne(item.imageId) },
+                                    onSkip = { reviewViewModel.skipOne(item.imageId) },
+                                )
+                            }
+                            item { Spacer(Modifier.height(8.dp)) }
+                        }
+                    }
+                }
+            }
+
+            if (permissions.allGranted && items.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = { skipAllConfirm = true },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Skip all") }
+                    Button(
+                        onClick = { reviewViewModel.requestStripAll() },
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Strip all") }
+                }
+            }
+        }
+    }
+
+    pendingDelete?.let { zone ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Delete zone?") },
+            text = { Text("\"${zone.name}\" will be removed and the geofence unregistered.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    mainViewModel.deleteZone(zone)
+                    pendingDelete = null
+                }) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("Cancel") }
+            },
+        )
+    }
+
+    if (skipAllConfirm) {
+        AlertDialog(
+            onDismissRequest = { skipAllConfirm = false },
+            title = { Text("Skip all ${items.size} photos?") },
+            text = {
+                Text(
+                    "They will be removed from the queue. You can re-find them with Rescan if " +
+                        "they are still on the device.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    reviewViewModel.skipAll()
+                    skipAllConfirm = false
+                }) { Text("Skip all") }
+            },
+            dismissButton = {
+                TextButton(onClick = { skipAllConfirm = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    preview?.let { item ->
+        PhotoDetailDialog(
+            item = item,
+            zones = mapZones,
+            onDismiss = { preview = null },
+            onStrip = {
+                reviewViewModel.requestStripOne(item.imageId)
+                preview = null
+            },
+            onSkip = {
+                reviewViewModel.skipOne(item.imageId)
+                preview = null
+            },
+        )
+    }
+}
+
+private fun computeStatusTitle(
+    zones: List<ZoneListItem>,
+    permissionsAllGranted: Boolean,
+): String {
+    if (!permissionsAllGranted) return "Setup needed"
+    val active = zones.filter { it.isActive }.map { it.zone.name }
+    return when (active.size) {
+        0 -> "No active zones"
+        1 -> "Inside ${active[0]}"
+        2 -> "Inside ${active[0]} and ${active[1]}"
+        else -> "Inside ${active[0]}, ${active[1]} +${active.size - 2}"
+    }
+}
+
+@Composable
+private fun EmptyPhotoListHint(
+    rescanning: Boolean,
+    onRescan: () -> Unit,
+) {
+    Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                "No photos waiting",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "New photos taken inside a zone will appear here. You can also scan older photos already on the device.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = onRescan,
+                enabled = !rescanning,
+            ) {
+                if (rescanning) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Rescanning…")
+                } else {
+                    Text("Rescan past photos")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RescanProgressRow() {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+        Spacer(Modifier.width(12.dp))
+        Text(
+            "Rescanning past photos…",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun PendingRow(
+    item: PendingStrip,
+    onClick: () -> Unit,
+    onShowLocation: () -> Unit,
+    onStrip: () -> Unit,
+    onSkip: () -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+        Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Thumbnail(item = item, sizeDp = 56.dp)
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        item.displayName ?: "Image ${item.imageId}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    val fmt = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+                    val zone = item.zoneName?.let { " · $it" } ?: ""
+                    val primary = if (item.dateTakenMs > 0L) {
+                        "Taken ${fmt.format(Date(item.dateTakenMs))}$zone"
+                    } else {
+                        "Detected ${fmt.format(Date(item.detectedAt))}$zone"
+                    }
+                    Text(
+                        primary,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "Tap to preview",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = onShowLocation) { Text("Location") }
+                Spacer(Modifier.width(4.dp))
+                TextButton(onClick = onSkip) { Text("Skip") }
+                Spacer(Modifier.width(4.dp))
+                TextButton(onClick = onStrip) { Text("Strip GPS") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Thumbnail(item: PendingStrip, sizeDp: Dp) {
+    val sizePx = with(LocalDensity.current) { sizeDp.roundToPx() }
+    val bitmap = rememberPhotoBitmap(item.contentUri, sizePx)
+    val shape = RoundedCornerShape(8.dp)
+    Box(
+        modifier = Modifier
+            .size(sizeDp)
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap,
+                contentDescription = "Thumbnail of ${item.displayName ?: "image ${item.imageId}"}",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Icon(
+                Icons.Filled.BrokenImage,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(sizeDp / 2),
+            )
+        }
+    }
+}
+
+/** Peek height used by [BottomSheetScaffold] in [HomeScreen]. Sized to comfortably show the
+ *  drag handle plus the Zones header when collapsed. */
+private val SHEET_PEEK_HEIGHT = 96.dp
+
+/**
+ * Bottom-sheet content. The Material 3 [BottomSheetScaffold] renders its own drag handle above
+ * this composable, so we just supply the header + the zone list.
+ */
+@Composable
+private fun ZoneSheet(
+    zones: List<ZoneListItem>,
+    onAddZone: () -> Unit,
+    onEditZone: (Long) -> Unit,
+    onDeleteZone: (Zone) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Zones",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = onAddZone) {
+                Icon(Icons.Filled.Add, contentDescription = "Add zone")
+            }
+        }
+        if (zones.isEmpty()) {
+            Text(
+                "No zones yet — tap + to add one. Photos taken inside a zone will be queued for review.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+            Spacer(Modifier.height(16.dp))
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                items(zones, key = { it.zone.id }) { item ->
+                    ZoneFooterRow(
+                        item = item,
+                        onClick = { onEditZone(item.zone.id) },
+                        onDelete = { onDeleteZone(item.zone) },
+                    )
+                }
+                item { Spacer(Modifier.height(24.dp)) }
+            }
+        }
+    }
+}
+
+/**
+ * Small status indicator shown to the left of the topbar title.
+ *  - Inside any zone → green filled dot (active monitoring)
+ *  - Outside all zones (perms OK) → muted filled dot (idle but ready)
+ *  - Permissions incomplete → orange warning triangle (action needed)
+ */
+@Composable
+private fun StatusIndicator(permissionsAllGranted: Boolean, activeZoneCount: Int) {
+    val (icon, color) = when {
+        !permissionsAllGranted -> Icons.Filled.Warning to Color(0xFFEF6C00) // orange
+        activeZoneCount > 0 -> Icons.Filled.Circle to Color(0xFF2E7D32)     // green
+        else -> Icons.Filled.Circle to MaterialTheme.colorScheme.outline    // muted
+    }
+    Icon(
+        imageVector = icon,
+        contentDescription = null,
+        tint = color,
+        modifier = Modifier.size(14.dp),
+    )
+}
+
+@Composable
+private fun ZoneFooterRow(item: ZoneListItem, onClick: () -> Unit, onDelete: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Filled.LocationOn,
+            contentDescription = null,
+            tint = if (item.isActive) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(item.zone.name, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "${item.zone.radiusMeters.toInt()} m",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        ActiveBadge(active = item.isActive)
+        IconButton(onClick = onDelete) {
+            Icon(
+                Icons.Filled.Delete,
+                contentDescription = "Delete zone",
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ActiveBadge(active: Boolean) {
+    val (color, label) = if (active) {
+        Color(0xFF2E7D32) to "Inside"
+    } else {
+        MaterialTheme.colorScheme.outline to "Outside"
+    }
+    Surface(color = color, shape = CircleShape) {
+        Text(
+            label,
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+        )
+    }
+}

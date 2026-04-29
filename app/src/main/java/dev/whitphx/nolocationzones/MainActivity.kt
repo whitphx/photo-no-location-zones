@@ -41,14 +41,14 @@ class MainActivity : ComponentActivity() {
 
     private fun applyIntent(intent: Intent?) {
         when (intent?.action) {
-            ACTION_OPEN_REVIEW -> navSignal.openReviewOnce = true
+            ACTION_OPEN_REVIEW -> navSignal.openHomeOnce = true
             ACTION_STRIP_PHOTO -> {
-                navSignal.openReviewOnce = true
+                navSignal.openHomeOnce = true
                 val id = intent.getLongExtra(EXTRA_IMAGE_ID, -1L)
                 if (id >= 0) navSignal.pendingAction = PendingAction.StripPhoto(id)
             }
             ACTION_SHOW_LOCATION -> {
-                navSignal.openReviewOnce = true
+                navSignal.openHomeOnce = true
                 val id = intent.getLongExtra(EXTRA_IMAGE_ID, -1L)
                 if (id >= 0) navSignal.pendingAction = PendingAction.ShowLocation(id)
             }
