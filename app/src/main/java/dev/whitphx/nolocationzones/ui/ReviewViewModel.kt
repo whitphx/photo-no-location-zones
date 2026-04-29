@@ -129,6 +129,22 @@ class ReviewViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun requestStripOne(imageId: Long) {
+        viewModelScope.launch {
+            val item = pendingRepo.getAll().firstOrNull { it.imageId == imageId } ?: return@launch
+            try {
+                val intent = MediaStore.createWriteRequest(
+                    getApplication<Application>().contentResolver,
+                    listOf(item.contentUri),
+                )
+                _events.value = ReviewEvent.RequestWriteAccess(intent, listOf(imageId))
+            } catch (t: Throwable) {
+                Log.e(TAG, "createWriteRequest (single) failed", t)
+                _events.value = ReviewEvent.Error(t.message ?: "Couldn't request write access")
+            }
+        }
+    }
+
     fun rescan(daysBack: Int = PhotoRescanner.DEFAULT_DAYS_BACK) {
         if (_rescanning.value) return
         viewModelScope.launch {

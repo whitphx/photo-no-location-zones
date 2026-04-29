@@ -162,6 +162,7 @@ fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
                         PendingRow(
                             item = item,
                             onClick = { preview = item },
+                            onStrip = { viewModel.requestStripOne(item.imageId) },
                             onSkip = { viewModel.skipOne(item.imageId) },
                         )
                     }
@@ -237,37 +238,46 @@ private fun Header(count: Int) {
 }
 
 @Composable
-private fun PendingRow(item: PendingStrip, onClick: () -> Unit, onSkip: () -> Unit) {
+private fun PendingRow(
+    item: PendingStrip,
+    onClick: () -> Unit,
+    onStrip: () -> Unit,
+    onSkip: () -> Unit,
+) {
     Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Thumbnail(item = item, sizeDp = 56.dp)
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    item.displayName ?: "Image ${item.imageId}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                val time = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
-                    .format(Date(item.detectedAt))
-                val zone = item.zoneName?.let { " · $it" } ?: ""
-                Text(
-                    "Detected $time$zone",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    "Tap to preview",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+        Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Thumbnail(item = item, sizeDp = 56.dp)
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        item.displayName ?: "Image ${item.imageId}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    val time = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+                        .format(Date(item.detectedAt))
+                    val zone = item.zoneName?.let { " · $it" } ?: ""
+                    Text(
+                        "Detected $time$zone",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        "Tap to preview",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-            Spacer(Modifier.width(8.dp))
-            TextButton(onClick = onSkip) {
-                Text("Skip")
+            Spacer(Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                TextButton(onClick = onSkip) { Text("Skip") }
+                Spacer(Modifier.width(4.dp))
+                TextButton(onClick = onStrip) { Text("Strip GPS") }
             }
         }
     }
