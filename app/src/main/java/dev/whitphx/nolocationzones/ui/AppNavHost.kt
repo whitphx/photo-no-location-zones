@@ -1,5 +1,6 @@
 package dev.whitphx.nolocationzones.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -54,6 +55,12 @@ fun AppNavHost(viewModel: MainViewModel, signal: NavSignal) {
             actionForReview = it
             signal.pendingAction = null
         }
+    }
+
+    // System back / gesture back on a sub-screen pops to Home instead of finishing the Activity.
+    // On Home itself, BackHandler is disabled so the default behaviour (close the app) wins.
+    BackHandler(enabled = screen != Screen.Home) {
+        screen = Screen.Home
     }
 
     when (val current = screen) {
