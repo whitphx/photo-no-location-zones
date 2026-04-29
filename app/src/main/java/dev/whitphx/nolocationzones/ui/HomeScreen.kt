@@ -584,10 +584,10 @@ private fun Thumbnail(item: PendingStrip, sizeDp: Dp) {
     }
 }
 
-/** Peek height used by [BottomSheetScaffold] in [HomeScreen]. Sized so the drag handle, the
- *  Zones header, and one zone row are all visible by default — the user gets a hint of the
- *  list's content without having to drag. */
-private val SHEET_PEEK_HEIGHT = 180.dp
+/** Peek height used by [BottomSheetScaffold] in [HomeScreen]. Sized so just the drag handle
+ *  and the "Zones" header (with its count badge + add button) are visible. The badge tells
+ *  the user how many zones exist; the user drags up to see the rows. */
+private val SHEET_PEEK_HEIGHT = 110.dp
 
 /**
  * Bottom-sheet content. The Material 3 [BottomSheetScaffold] renders its own drag handle above
