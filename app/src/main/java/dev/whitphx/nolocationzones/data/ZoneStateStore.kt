@@ -25,6 +25,8 @@ class ZoneStateStore(private val context: Context) {
 
     suspend fun isAnyZoneActive(): Boolean = activeZoneIds.first().isNotEmpty()
 
+    suspend fun firstActiveZoneId(): Long? = activeZoneIds.first().firstOrNull()
+
     suspend fun markEntered(ids: Collection<Long>) {
         prefs.edit { p ->
             val current = p[ACTIVE_ZONE_IDS]?.toMutableSet() ?: mutableSetOf()

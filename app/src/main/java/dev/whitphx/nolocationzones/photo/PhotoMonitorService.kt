@@ -1,9 +1,13 @@
 package dev.whitphx.nolocationzones.photo
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.PendingIntent
+import android.content.ContentUris
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.database.ContentObserver
 import android.net.Uri
@@ -13,46 +17,45 @@ import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import dev.whitphx.nolocationzones.App
 import dev.whitphx.nolocationzones.MainActivity
 import dev.whitphx.nolocationzones.R
+import dev.whitphx.nolocationzones.data.PendingStripRepository
 import dev.whitphx.nolocationzones.data.ZoneRepository
 import dev.whitphx.nolocationzones.data.ZoneStateStore
-import dev.whitphx.nolocationzones.domain.Zone
-import java.io.File
-import kotlinx.coroutines.CoroutineExceptionHandler
+import dev.whitphx.nolocationzones.domain.PendingStrip
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.consumeAsFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Foreground service that runs while the user is inside any zone. Watches MediaStore for new
- * photos and strips GPS EXIF tags from each one.
+ * While the user is inside any zone, watches MediaStore for new photos. For each new photo that
+ * still has GPS metadata, inserts a row into the pending-strip queue (Room) and updates the
+ * notification so the user can review and authorize a batch strip from the app.
  *
- * Started from a geofence ENTER broadcast (allowed FGS BG-start exemption when the app holds
- * ACCESS_BACKGROUND_LOCATION). Stops itself when ZoneStateStore reports no active zones.
+ * The service does NOT modify photos — modification requires user consent via
+ * [MediaStore.createWriteRequest], which can only be invoked from an Activity. The service's only
+ * job is detection + queueing.
  *
- * Service type: `location`. The work is location-triggered and only runs while inside a defined
- * geographic area, which matches the spirit of the type and is the only background-startable
- * type that lines up with the permissions this app already has.
+ * Service type: `location` — the work is gated by location and bounded to a defined geographic
+ * area, which matches the type's spirit and is the only background-startable type that aligns with
+ * the permissions this app already has.
  */
 class PhotoMonitorService : LifecycleService() {
 
     private lateinit var stateStore: ZoneStateStore
     private lateinit var zoneRepo: ZoneRepository
+    private lateinit var pendingRepo: PendingStripRepository
 
-    private val workQueue = Channel<Long>(capacity = Channel.UNLIMITED)
     private val mediaChanges = MutableSharedFlow<Unit>(extraBufferCapacity = 16)
 
     private val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
@@ -66,12 +69,13 @@ class PhotoMonitorService : LifecycleService() {
         val app = applicationContext as App
         stateStore = app.container.zoneStateStore
         zoneRepo = app.container.zoneRepository
+        pendingRepo = app.container.pendingStripRepository
     }
 
     @OptIn(FlowPreview::class)
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
-        startForegroundCompat(buildNotification(currentZoneCount = 1, zoneName = null))
+        startForegroundCompat(buildOngoingNotification(activeZoneCount = 1, zoneName = null, pendingCount = 0))
 
         contentResolver.registerContentObserver(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
@@ -79,56 +83,57 @@ class PhotoMonitorService : LifecycleService() {
             observer,
         )
 
-        // Stop ourselves the moment the user has left every zone.
+        // Refresh the foreground notification whenever the active-zone set or pending count changes.
+        // Stop the service on zone-exit regardless of pending count — review notifications persist
+        // independently and ContentObserver has nothing more to detect once we leave every zone.
         lifecycleScope.launch {
-            stateStore.activeZoneIds.collectLatest { active ->
-                if (active.isEmpty()) {
-                    Log.i(TAG, "No active zones — stopping service")
-                    stopSelf()
-                } else {
-                    val name = active.firstOrNull()?.let { runCatching { zoneRepo.get(it)?.name }.getOrNull() }
-                    val n = buildNotification(active.size, name)
-                    ContextCompat.getSystemService(this@PhotoMonitorService, android.app.NotificationManager::class.java)
-                        ?.notify(NOTIFICATION_ID, n)
+            combine(stateStore.activeZoneIds, pendingRepo.count) { active, pending -> active to pending }
+                .collectLatest { (active, pending) ->
+                    if (active.isEmpty()) {
+                        Log.i(TAG, "No active zones — stopping service")
+                        stopSelf()
+                        return@collectLatest
+                    }
+                    val name = active.firstOrNull()?.let {
+                        runCatching { zoneRepo.get(it)?.name }.getOrNull()
+                    }
+                    notifyIfPermitted(NOTIFICATION_ID_ONGOING, buildOngoingNotification(active.size, name, pending))
+                    if (pending > 0) {
+                        notifyIfPermitted(NOTIFICATION_ID_REVIEW, buildReviewNotification(pending))
+                    } else {
+                        NotificationManagerCompat.from(this@PhotoMonitorService)
+                            .cancel(NOTIFICATION_ID_REVIEW)
+                    }
                 }
-            }
         }
 
-        // MediaStore -> debounce -> scan
+        // MediaStore -> debounce -> scan + queue
         lifecycleScope.launch {
             mediaChanges.debounce(MEDIA_DEBOUNCE_MS).collect {
-                scanForNewPhotos()
-            }
-        }
-
-        // Process scrub queue serially so two rapidly-arriving photos can't stomp each other.
-        val scrubExceptionHandler = CoroutineExceptionHandler { _, t ->
-            Log.e(TAG, "Scrub coroutine crashed", t)
-        }
-        lifecycleScope.launch(Dispatchers.IO + scrubExceptionHandler) {
-            workQueue.consumeAsFlow().filter { it > 0 }.collect { imageId ->
-                scrubImageWithRetry(imageId)
+                if (stateStore.isAnyZoneActive()) scanAndQueue()
             }
         }
 
         // Initial scan in case photos appeared while the service was being started.
-        lifecycleScope.launch { scanForNewPhotos() }
+        lifecycleScope.launch { if (stateStore.isAnyZoneActive()) scanAndQueue() }
 
         return START_STICKY
     }
 
     override fun onDestroy() {
         contentResolver.unregisterContentObserver(observer)
-        workQueue.close()
         super.onDestroy()
     }
 
-    private suspend fun scanForNewPhotos() = withContext(Dispatchers.IO) {
+    private suspend fun scanAndQueue() = withContext(Dispatchers.IO) {
         val cutoff = stateStore.getLastSeenImageId()
+        val activeId = stateStore.firstActiveZoneId()
+        val zoneName = activeId?.let { runCatching { zoneRepo.get(it)?.name }.getOrNull() }
+
         val projection = arrayOf(
             MediaStore.Images.Media._ID,
-            MediaStore.Images.Media.DATA,
             MediaStore.Images.Media.MIME_TYPE,
+            MediaStore.Images.Media.DISPLAY_NAME,
         )
         val selection = "${MediaStore.Images.Media._ID} > ? AND " +
             "(${MediaStore.Images.Media.MIME_TYPE} = 'image/jpeg' OR " +
@@ -147,107 +152,113 @@ class PhotoMonitorService : LifecycleService() {
             )
         }.getOrNull() ?: return@withContext
 
+        val now = System.currentTimeMillis()
+        var maxSeen = cutoff
         cursor.use { c ->
             val idCol = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-            var maxSeen = cutoff
+            val nameCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
             while (c.moveToNext()) {
                 val id = c.getLong(idCol)
                 if (id > maxSeen) maxSeen = id
-                workQueue.trySend(id)
-            }
-            if (maxSeen > cutoff) stateStore.setLastSeenImageId(maxSeen)
-        }
-    }
-
-    private suspend fun scrubImageWithRetry(imageId: Long) {
-        val backoffMs = longArrayOf(0L, 750L, 2_000L, 5_000L)
-        for ((attempt, delayMs) in backoffMs.withIndex()) {
-            if (delayMs > 0) delay(delayMs)
-            val path = lookupPath(imageId) ?: run {
-                Log.w(TAG, "Image $imageId disappeared from MediaStore")
-                return
-            }
-            val file = File(path)
-            // The camera may still be writing — if size keeps changing, wait one more round.
-            val sizeA = file.length()
-            delay(150)
-            if (file.length() != sizeA) continue
-
-            when (val r = ExifGpsStripper.strip(file)) {
-                is ExifGpsStripper.Result.Stripped -> {
-                    Log.i(TAG, "Stripped GPS from $path (cleared ${r.tagsCleared} tags)")
-                    refreshMediaStoreEntry(imageId)
-                    return
+                val uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+                if (!ExifGpsStripper.hasGpsTags(contentResolver, uri)) {
+                    Log.d(TAG, "Image $id has no GPS — skipping queue")
+                    continue
                 }
-                ExifGpsStripper.Result.NoChange -> {
-                    Log.d(TAG, "$path had no GPS tags (idempotent skip)")
-                    return
-                }
-                is ExifGpsStripper.Result.Failed -> {
-                    Log.w(TAG, "Strip attempt ${attempt + 1} failed for $path: ${r.cause.message}")
-                }
+                pendingRepo.add(
+                    PendingStrip(
+                        imageId = id,
+                        contentUri = uri,
+                        displayName = c.getString(nameCol),
+                        detectedAt = now,
+                        zoneName = zoneName,
+                    )
+                )
+                Log.i(TAG, "Queued image $id for user review")
             }
         }
-        Log.e(TAG, "Gave up scrubbing image $imageId after ${backoffMs.size} attempts")
-    }
-
-    private fun lookupPath(imageId: Long): String? {
-        val uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-        val projection = arrayOf(MediaStore.Images.Media.DATA)
-        val selection = "${MediaStore.Images.Media._ID} = ?"
-        val args = arrayOf(imageId.toString())
-        return contentResolver.query(uri, projection, selection, args, null)?.use { c ->
-            if (c.moveToFirst()) c.getString(0) else null
-        }
-    }
-
-    private fun refreshMediaStoreEntry(imageId: Long) {
-        // Tell MediaStore the file changed so its cached EXIF is reread.
-        runCatching {
-            val uri = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-                .buildUpon().appendPath(imageId.toString()).build()
-            contentResolver.notifyChange(uri, null)
-        }
+        if (maxSeen > cutoff) stateStore.setLastSeenImageId(maxSeen)
     }
 
     private fun startForegroundCompat(notification: Notification) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
-                NOTIFICATION_ID,
+                NOTIFICATION_ID_ONGOING,
                 notification,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
             )
         } else {
-            startForeground(NOTIFICATION_ID, notification)
+            startForeground(NOTIFICATION_ID_ONGOING, notification)
         }
     }
 
-    private fun buildNotification(currentZoneCount: Int, zoneName: String?): Notification {
-        val text = if (currentZoneCount > 1 || zoneName == null) {
-            val n = currentZoneCount.coerceAtLeast(1)
-            resources.getQuantityString(R.plurals.photo_monitor_notification_text_multi, n, n)
-        } else {
-            getString(R.string.photo_monitor_notification_text, zoneName)
+    private fun buildOngoingNotification(
+        activeZoneCount: Int,
+        zoneName: String?,
+        pendingCount: Int,
+    ): Notification {
+        val text = when {
+            pendingCount > 0 ->
+                resources.getQuantityString(R.plurals.ongoing_with_pending, pendingCount, pendingCount)
+            activeZoneCount > 1 || zoneName == null ->
+                resources.getQuantityString(
+                    R.plurals.photo_monitor_notification_text_multi,
+                    activeZoneCount.coerceAtLeast(1),
+                    activeZoneCount.coerceAtLeast(1),
+                )
+            else -> getString(R.string.photo_monitor_notification_text, zoneName)
         }
-        val pi = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
         return NotificationCompat.Builder(this, App.CHANNEL_PHOTO_MONITOR)
             .setSmallIcon(R.drawable.ic_zone_pin)
             .setContentTitle(getString(R.string.photo_monitor_notification_title))
             .setContentText(text)
-            .setContentIntent(pi)
+            .setContentIntent(reviewActivityPendingIntent())
             .setOngoing(true)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_DEFERRED)
             .build()
     }
 
+    private fun buildReviewNotification(pendingCount: Int): Notification {
+        val text = resources.getQuantityString(
+            R.plurals.review_notification_text,
+            pendingCount,
+            pendingCount,
+        )
+        return NotificationCompat.Builder(this, App.CHANNEL_REVIEW)
+            .setSmallIcon(R.drawable.ic_zone_pin)
+            .setContentTitle(getString(R.string.review_notification_title))
+            .setContentText(text)
+            .setContentIntent(reviewActivityPendingIntent())
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .build()
+    }
+
+    private fun reviewActivityPendingIntent(): PendingIntent {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            action = MainActivity.ACTION_OPEN_REVIEW
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        return PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    @SuppressLint("MissingPermission") // checked at the top of this function
+    private fun notifyIfPermitted(id: Int, notification: Notification) {
+        val granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        if (granted) NotificationManagerCompat.from(this).notify(id, notification)
+    }
+
     companion object {
         private const val TAG = "PhotoMonitorService"
-        private const val NOTIFICATION_ID = 0xC4FE
+        private const val NOTIFICATION_ID_ONGOING = 0xC4FE
+        private const val NOTIFICATION_ID_REVIEW = 0xC4FF
         private const val MEDIA_DEBOUNCE_MS = 400L
 
         fun start(context: Context) {

@@ -1,13 +1,9 @@
 package dev.whitphx.nolocationzones.ui
 
 import android.Manifest
-import android.content.Intent
-import android.net.Uri
 import android.os.Build
-import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -34,12 +30,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import dev.whitphx.nolocationzones.permissions.PermissionState
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.whitphx.nolocationzones.permissions.Permissions
 
 @Composable
@@ -47,7 +42,6 @@ fun PermissionsCard(onAllGranted: () -> Unit) {
     val context = LocalContext.current
     var state by remember { mutableStateOf(Permissions.read(context)) }
 
-    // Re-read whenever the activity returns to the foreground (e.g. after Settings trip).
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
@@ -73,7 +67,7 @@ fun PermissionsCard(onAllGranted: () -> Unit) {
             Text("Permissions", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(4.dp))
             Text(
-                "Grant these once. Background location and All Files Access each need a separate trip.",
+                "Grant these once. Background location needs a separate trip to Settings on Android 11+.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -110,18 +104,6 @@ fun PermissionsCard(onAllGranted: () -> Unit) {
                     onClick = { notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
                 )
             }
-
-            PermissionRow(
-                label = "All files access (writes scrubbed photos in place)",
-                granted = state.manageExternalStorage,
-                onClick = {
-                    val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
-                        .setData(Uri.parse("package:${context.packageName}"))
-                    runCatching { context.startActivity(intent) }.onFailure {
-                        context.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-                    }
-                },
-            )
         }
     }
 }

@@ -29,17 +29,17 @@ class App : Application() {
         )
         nm.createNotificationChannel(
             NotificationChannel(
-                CHANNEL_RESULTS,
-                getString(R.string.results_channel_name),
-                NotificationManager.IMPORTANCE_MIN,
+                CHANNEL_REVIEW,
+                getString(R.string.review_channel_name),
+                NotificationManager.IMPORTANCE_HIGH,
             ).apply {
-                description = getString(R.string.results_channel_description)
+                description = getString(R.string.review_channel_description)
             }
         )
     }
 
     companion object {
         const val CHANNEL_PHOTO_MONITOR = "photo_monitor"
-        const val CHANNEL_RESULTS = "scrub_results"
+        const val CHANNEL_REVIEW = "review_pending"
     }
 }

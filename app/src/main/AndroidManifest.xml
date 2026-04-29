@@ -8,17 +8,11 @@
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
 
     <!-- Photo access. ACCESS_MEDIA_LOCATION lets us read on-disk EXIF location through MediaStore;
-         we need it so the platform doesn't redact GPS data we are about to scrub. -->
+         we need it so the platform doesn't redact GPS data when we check whether a photo has
+         anything to scrub. Writes go through MediaStore.createWriteRequest() per batch, so no
+         broad storage permission is required. -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
-
-    <!-- The pragmatic personal-build shortcut: lets us read AND write any photo file directly,
-         bypassing the per-photo MediaStore.createWriteRequest() consent dance that would otherwise
-         be required to modify photos written by the camera app. The user grants this once via
-         Settings > "All files access". For a Play-Store-ready version this would be replaced with
-         per-photo write requests. -->
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
-        tools:ignore="ScopedStorage" />
 
     <!-- Foreground service to monitor MediaStore while inside a zone. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

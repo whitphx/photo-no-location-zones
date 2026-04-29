@@ -1,5 +1,6 @@
 package dev.whitphx.nolocationzones
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -12,20 +13,36 @@ import androidx.compose.ui.Modifier
 import dev.whitphx.nolocationzones.theme.NoLocationZonesTheme
 import dev.whitphx.nolocationzones.ui.AppNavHost
 import dev.whitphx.nolocationzones.ui.MainViewModel
+import dev.whitphx.nolocationzones.ui.NavSignal
 
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels { MainViewModel.factory(application as App) }
+    private val navSignal = NavSignal()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        applyIntent(intent)
         setContent {
             NoLocationZonesTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    AppNavHost(viewModel)
+                    AppNavHost(viewModel, navSignal)
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        applyIntent(intent)
+    }
+
+    private fun applyIntent(intent: Intent?) {
+        if (intent?.action == ACTION_OPEN_REVIEW) navSignal.openReviewOnce = true
+    }
+
+    companion object {
+        const val ACTION_OPEN_REVIEW = "dev.whitphx.nolocationzones.OPEN_REVIEW"
     }
 }

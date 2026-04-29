@@ -9,6 +9,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import dev.whitphx.nolocationzones.App
+import dev.whitphx.nolocationzones.data.PendingStripRepository
 import dev.whitphx.nolocationzones.data.ZoneRepository
 import dev.whitphx.nolocationzones.data.ZoneStateStore
 import dev.whitphx.nolocationzones.domain.Zone
@@ -37,11 +38,15 @@ class MainViewModel(private val app: App) : ViewModel() {
     private val zoneRepo: ZoneRepository = app.container.zoneRepository
     private val stateStore: ZoneStateStore = app.container.zoneStateStore
     private val geofenceController: GeofenceController = app.container.geofenceController
+    private val pendingRepo: PendingStripRepository = app.container.pendingStripRepository
 
     val zoneList: StateFlow<List<ZoneListItem>> =
         combine(zoneRepo.zones, stateStore.activeZoneIds) { zones, active ->
             zones.map { ZoneListItem(it, it.id in active) }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val pendingCount: StateFlow<Int> =
+        pendingRepo.count.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     private val _addZoneState = MutableStateFlow<AddZoneState>(AddZoneState.Idle)
     val addZoneState: StateFlow<AddZoneState> = _addZoneState.asStateFlow()

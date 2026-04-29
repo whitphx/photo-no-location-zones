@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import android.os.Environment
 import androidx.core.content.ContextCompat
 
 /** Snapshot of every runtime permission this app cares about. */
@@ -14,14 +13,11 @@ data class PermissionState(
     val readImages: Boolean,
     val mediaLocation: Boolean,
     val postNotifications: Boolean,
-    val manageExternalStorage: Boolean,
 ) {
-    /** Foreground location is the prerequisite for everything else. */
     val readyForGeofencing: Boolean get() = fineLocation && backgroundLocation
-    val readyForScrubbing: Boolean get() = readImages && manageExternalStorage
+    val readyForScrubbing: Boolean get() = readImages && mediaLocation
     val allGranted: Boolean
-        get() = fineLocation && backgroundLocation && readImages && mediaLocation &&
-            postNotifications && manageExternalStorage
+        get() = fineLocation && backgroundLocation && readImages && mediaLocation && postNotifications
 }
 
 object Permissions {
@@ -43,7 +39,6 @@ object Permissions {
             } else {
                 true
             },
-            manageExternalStorage = Environment.isExternalStorageManager(),
         )
 
     private fun isGranted(context: Context, permission: String): Boolean =

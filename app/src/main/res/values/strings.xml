@@ -1,13 +1,24 @@
 <resources>
     <string name="app_name">No-Location Zones</string>
+
     <string name="photo_monitor_channel_name">Zone monitoring</string>
-    <string name="photo_monitor_channel_description">Active while inside a no-location zone, watching for new photos to scrub.</string>
+    <string name="photo_monitor_channel_description">Active while inside a no-location zone, watching for new photos.</string>
     <string name="photo_monitor_notification_title">Watching for new photos</string>
-    <string name="photo_monitor_notification_text">Inside %1$s — GPS will be removed from new photos.</string>
+    <string name="photo_monitor_notification_text">Inside %1$s — new GPS-tagged photos will be queued for review.</string>
     <plurals name="photo_monitor_notification_text_multi">
-        <item quantity="one">Inside %1$d zone — GPS will be removed from new photos.</item>
-        <item quantity="other">Inside %1$d zones — GPS will be removed from new photos.</item>
+        <item quantity="one">Inside %1$d zone — new GPS-tagged photos will be queued for review.</item>
+        <item quantity="other">Inside %1$d zones — new GPS-tagged photos will be queued for review.</item>
     </plurals>
-    <string name="results_channel_name">Strip results</string>
-    <string name="results_channel_description">One-shot notifications when a photo has been scrubbed (or failed).</string>
+    <plurals name="ongoing_with_pending">
+        <item quantity="one">%1$d photo waiting for review. Tap to authorize.</item>
+        <item quantity="other">%1$d photos waiting for review. Tap to authorize.</item>
+    </plurals>
+
+    <string name="review_channel_name">Review pending</string>
+    <string name="review_channel_description">Notifies when photos taken inside a zone are waiting for the GPS strip to be authorized.</string>
+    <string name="review_notification_title">Photos waiting for review</string>
+    <plurals name="review_notification_text">
+        <item quantity="one">%1$d photo with GPS data — tap to authorize stripping.</item>
+        <item quantity="other">%1$d photos with GPS data — tap to authorize stripping.</item>
+    </plurals>
 </resources>

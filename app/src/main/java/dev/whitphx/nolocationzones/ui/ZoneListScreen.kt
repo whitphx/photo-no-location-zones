@@ -47,8 +47,13 @@ import dev.whitphx.nolocationzones.domain.Zone
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ZoneListScreen(viewModel: MainViewModel, onAddZone: () -> Unit) {
+fun ZoneListScreen(
+    viewModel: MainViewModel,
+    onAddZone: () -> Unit,
+    onReview: () -> Unit,
+) {
     val items by viewModel.zoneList.collectAsStateWithLifecycle()
+    val pendingCount by viewModel.pendingCount.collectAsStateWithLifecycle()
     var pendingDelete: Zone? by remember { mutableStateOf(null) }
 
     Scaffold(
@@ -68,6 +73,9 @@ fun ZoneListScreen(viewModel: MainViewModel, onAddZone: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item { Spacer(Modifier.height(8.dp)) }
+            if (pendingCount > 0) {
+                item { ReviewBanner(count = pendingCount, onClick = onReview) }
+            }
             item { PermissionsCard(onAllGranted = { viewModel.resyncGeofences() }) }
             item {
                 Spacer(Modifier.height(8.dp))
@@ -183,6 +191,40 @@ private fun ActiveBadge(active: Boolean) {
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
         )
+    }
+}
+
+@Composable
+private fun ReviewBanner(count: Int, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+        onClick = onClick,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Filled.LocationOn,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                modifier = Modifier.size(24.dp),
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "$count photo${if (count == 1) "" else "s"} waiting for review",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "Tap to authorize the GPS strip.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 
