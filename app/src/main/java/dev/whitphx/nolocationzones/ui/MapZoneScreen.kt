@@ -301,10 +301,13 @@ private fun BottomPanel(
                         Text("Delete")
                     }
                 }
-                // Save is always enabled. The ViewModel falls back to "Zone" if name is blank,
-                // so users who don't care about naming can just tap Save.
+                // Disabled when the user has actively cleared the (pre-populated) name — acts as
+                // a safeguard against creating a placeholder-named zone, without surprising
+                // first-time users who never see this state because the field is non-blank by
+                // default.
                 Button(
                     onClick = onSave,
+                    enabled = name.isNotBlank(),
                     modifier = Modifier.weight(1f),
                 ) { Text("Save") }
             }
