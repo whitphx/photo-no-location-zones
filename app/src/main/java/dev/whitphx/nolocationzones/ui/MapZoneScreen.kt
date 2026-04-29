@@ -362,11 +362,6 @@ private fun RadiusControl(radius: Float, onRadiusChange: (Float) -> Unit) {
         valueRange = Zone.MIN_RADIUS_METERS..Zone.MAX_RADIUS_METERS,
         steps = 48,
     )
-    Text(
-        "Slider snaps to 100 m steps. Type the field above for an exact value (100–5000 m).",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
 }
 
 @Composable
