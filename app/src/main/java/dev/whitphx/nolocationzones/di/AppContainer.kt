@@ -6,6 +6,7 @@ import dev.whitphx.nolocationzones.data.PendingStripRepository
 import dev.whitphx.nolocationzones.data.ZoneRepository
 import dev.whitphx.nolocationzones.data.ZoneStateStore
 import dev.whitphx.nolocationzones.geofence.GeofenceController
+import dev.whitphx.nolocationzones.photo.PhotoRescanner
 
 class AppContainer(context: Context) {
     private val appContext = context.applicationContext
@@ -16,4 +17,5 @@ class AppContainer(context: Context) {
     val pendingStripRepository by lazy { PendingStripRepository(database.pendingStripDao()) }
     val zoneStateStore by lazy { ZoneStateStore(appContext) }
     val geofenceController by lazy { GeofenceController(appContext) }
+    val photoRescanner by lazy { PhotoRescanner(appContext, zoneRepository, pendingStripRepository) }
 }

@@ -75,9 +75,7 @@ fun ZoneListScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item { Spacer(Modifier.height(8.dp)) }
-            if (pendingCount > 0) {
-                item { ReviewBanner(count = pendingCount, onClick = onReview) }
-            }
+            item { ReviewBanner(count = pendingCount, onClick = onReview) }
             item { PermissionsCard(onAllGranted = { viewModel.resyncGeofences() }) }
             item {
                 Spacer(Modifier.height(8.dp))
@@ -199,9 +197,14 @@ private fun ActiveBadge(active: Boolean) {
 
 @Composable
 private fun ReviewBanner(count: Int, onClick: () -> Unit) {
+    val active = count > 0
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+        colors = if (active) {
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+        } else {
+            CardDefaults.cardColors()
+        },
         onClick = onClick,
     ) {
         Row(
@@ -211,21 +214,35 @@ private fun ReviewBanner(count: Int, onClick: () -> Unit) {
             Icon(
                 Icons.Filled.LocationOn,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                tint = if (active) MaterialTheme.colorScheme.onTertiaryContainer
+                else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(24.dp),
             )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    "$count photo${if (count == 1) "" else "s"} waiting for review",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    "Tap to authorize the GPS strip.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (active) {
+                    Text(
+                        "$count photo${if (count == 1) "" else "s"} waiting for review",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "Tap to authorize the GPS strip.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        "Review queue is empty",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "Tap to rescan past photos for ones taken inside a zone.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }

@@ -24,6 +24,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -61,10 +63,12 @@ import java.util.Date
 fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
     val items by viewModel.pending.collectAsStateWithLifecycle()
     val event by viewModel.events.collectAsState()
+    val rescanning by viewModel.rescanning.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
 
     var pendingTargetIds by remember { mutableStateOf<List<Long>>(emptyList()) }
     var preview: PendingStrip? by remember { mutableStateOf(null) }
+    var skipAllConfirm by remember { mutableStateOf(false) }
 
     val writeAccessLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult(),
@@ -93,6 +97,15 @@ fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
                 snackbar.showSnackbar(parts.joinToString(", ").ifEmpty { "No changes" })
                 viewModel.consumeEvent()
             }
+            is ReviewEvent.RescanCompleted -> {
+                val msg = when {
+                    e.zonesAtScan == 0 -> "Add a zone first — nothing to scan against."
+                    e.matched == 0 -> "Scanned ${e.scanned} recent photos — none taken inside a zone."
+                    else -> "Found ${e.matched} photo${if (e.matched == 1) "" else "s"} taken inside a zone."
+                }
+                snackbar.showSnackbar(msg)
+                viewModel.consumeEvent()
+            }
             is ReviewEvent.Error -> {
                 snackbar.showSnackbar(e.message)
                 viewModel.consumeEvent()
@@ -110,6 +123,14 @@ fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
+                actions = {
+                    IconButton(
+                        onClick = { viewModel.rescan() },
+                        enabled = !rescanning,
+                    ) {
+                        Icon(Icons.Filled.Refresh, contentDescription = "Rescan past photos")
+                    }
+                },
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
@@ -117,6 +138,8 @@ fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
         Column(
             modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
         ) {
+            Spacer(Modifier.height(8.dp))
+            RescanCard(rescanning = rescanning, onRescan = { viewModel.rescan() })
             Spacer(Modifier.height(8.dp))
             if (items.isEmpty()) {
                 EmptyHint(modifier = Modifier.weight(1f))
@@ -141,7 +164,7 @@ fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     OutlinedButton(
-                        onClick = { viewModel.skipAll() },
+                        onClick = { skipAllConfirm = true },
                         modifier = Modifier.weight(1f),
                     ) { Text("Skip all") }
                     Button(
@@ -151,6 +174,30 @@ fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
                 }
             }
         }
+    }
+
+    if (skipAllConfirm) {
+        AlertDialog(
+            onDismissRequest = { skipAllConfirm = false },
+            title = { Text("Skip all ${items.size} photos?") },
+            text = {
+                Text(
+                    "They will be removed from the queue. You can re-find them with Rescan if " +
+                        "they are still on the device.",
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    viewModel.skipAll()
+                    skipAllConfirm = false
+                }) { Text("Skip all") }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { skipAllConfirm = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 
     preview?.let { item ->
@@ -225,10 +272,44 @@ private fun EmptyHint(modifier: Modifier = Modifier) {
             Text("No photos waiting", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(4.dp))
             Text(
-                "Photos taken inside a zone will appear here for review.",
+                "New photos taken inside a zone will appear here. To re-find skipped or older " +
+                    "photos still on the device, use Rescan above.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+@Composable
+private fun RescanCard(rescanning: Boolean, onRescan: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Rescan past photos",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "Walks the last 30 days of photos and re-queues any whose own GPS data " +
+                        "places them inside one of your zones — useful for recovering skipped " +
+                        "items or pulling in older photos.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            if (rescanning) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    modifier = Modifier.size(28.dp),
+                )
+            } else {
+                OutlinedButton(onClick = onRescan) { Text("Rescan") }
+            }
         }
     }
 }

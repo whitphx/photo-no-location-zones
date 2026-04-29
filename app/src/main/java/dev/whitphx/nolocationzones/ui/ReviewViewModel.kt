@@ -2,7 +2,6 @@ package dev.whitphx.nolocationzones.ui
 
 import android.app.Application
 import android.app.PendingIntent
-import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
@@ -14,6 +13,7 @@ import dev.whitphx.nolocationzones.App
 import dev.whitphx.nolocationzones.data.PendingStripRepository
 import dev.whitphx.nolocationzones.domain.PendingStrip
 import dev.whitphx.nolocationzones.photo.ExifGpsStripper
+import dev.whitphx.nolocationzones.photo.PhotoRescanner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -27,18 +27,23 @@ sealed interface ReviewEvent {
     /** Tell the activity to launch this PendingIntent via an IntentSenderRequest. */
     data class RequestWriteAccess(val intent: PendingIntent, val targetIds: List<Long>) : ReviewEvent
     data class StripCompleted(val stripped: Int, val skipped: Int, val failed: Int) : ReviewEvent
+    data class RescanCompleted(val matched: Int, val scanned: Int, val zonesAtScan: Int) : ReviewEvent
     data class Error(val message: String) : ReviewEvent
 }
 
 class ReviewViewModel(application: Application) : AndroidViewModel(application) {
-    private val pendingRepo: PendingStripRepository =
-        (application as App).container.pendingStripRepository
+    private val app = application as App
+    private val pendingRepo: PendingStripRepository = app.container.pendingStripRepository
+    private val rescanner: PhotoRescanner = app.container.photoRescanner
 
     val pending: StateFlow<List<PendingStrip>> =
         pendingRepo.all.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _events = MutableStateFlow<ReviewEvent?>(null)
     val events: StateFlow<ReviewEvent?> = _events.asStateFlow()
+
+    private val _rescanning = MutableStateFlow(false)
+    val rescanning: StateFlow<Boolean> = _rescanning.asStateFlow()
 
     fun consumeEvent() {
         _events.value = null
@@ -118,14 +123,25 @@ class ReviewViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun rescan(daysBack: Int = PhotoRescanner.DEFAULT_DAYS_BACK) {
+        if (_rescanning.value) return
+        viewModelScope.launch {
+            _rescanning.value = true
+            try {
+                val r = rescanner.rescanRecent(daysBack)
+                _events.value = ReviewEvent.RescanCompleted(r.matched, r.scanned, r.zonesAtScan)
+            } catch (t: Throwable) {
+                _events.value = ReviewEvent.Error(t.message ?: "Rescan failed")
+            } finally {
+                _rescanning.value = false
+            }
+        }
+    }
+
     companion object {
         private const val TAG = "ReviewViewModel"
 
         fun factory(app: App): ViewModelProvider.Factory =
             viewModelFactory { initializer { ReviewViewModel(app) } }
-
-        /** [MediaStore.createWriteRequest] requires API 30+, which matches our minSdk. */
-        @Suppress("UNUSED")
-        private val MIN_API_REQUIRED = Build.VERSION_CODES.R
     }
 }
