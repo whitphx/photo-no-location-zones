@@ -185,20 +185,20 @@ fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
         Column(
             modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
         ) {
-            Spacer(Modifier.height(8.dp))
-            RescanCard(rescanning = rescanning, onRescan = { viewModel.rescan(it) })
-            Spacer(Modifier.height(8.dp))
-            ScrubScopeCard()
-            Spacer(Modifier.height(8.dp))
-            if (items.isEmpty()) {
-                EmptyHint(modifier = Modifier.weight(1f))
-            } else {
-                Header(count = items.size)
-                Spacer(Modifier.height(8.dp))
-                LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
+            // Reference cards live inside the LazyColumn so they scroll out of the way when the
+            // user wants to focus on the photo list. The action row at the bottom stays pinned.
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                item { Spacer(Modifier.height(8.dp)) }
+                item { RescanCard(rescanning = rescanning, onRescan = { viewModel.rescan(it) }) }
+                item { ScrubScopeCard() }
+                item { FaqCard() }
+                if (items.isEmpty()) {
+                    item { EmptyHint() }
+                } else {
+                    item { Header(count = items.size) }
                     items(items, key = { it.imageId }) { item ->
                         PendingRow(
                             item = item,
@@ -209,7 +209,9 @@ fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
                         )
                     }
                 }
-                Spacer(Modifier.height(8.dp))
+                item { Spacer(Modifier.height(8.dp)) }
+            }
+            if (items.isNotEmpty()) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -342,15 +344,19 @@ private fun PendingRow(
 }
 
 @Composable
-private fun EmptyHint(modifier: Modifier = Modifier) {
-    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("No photos waiting", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+private fun EmptyHint() {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                "No photos waiting",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
             Spacer(Modifier.height(4.dp))
             Text(
                 "New photos taken inside a zone will appear here. To re-find skipped or older " +
                     "photos still on the device, use Rescan above.",
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
