@@ -71,7 +71,12 @@ import java.util.Date
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
+fun ReviewScreen(
+    viewModel: ReviewViewModel,
+    pendingAction: PendingAction? = null,
+    onActionConsumed: () -> Unit = {},
+    onClose: () -> Unit,
+) {
     val items by viewModel.pending.collectAsStateWithLifecycle()
     val event by viewModel.events.collectAsState()
     val rescanning by viewModel.rescanning.collectAsStateWithLifecycle()
@@ -128,6 +133,34 @@ fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
             is ReviewEvent.Error -> {
                 snackbar.showSnackbar(e.message)
                 viewModel.consumeEvent()
+            }
+            null -> Unit
+        }
+    }
+
+    // Notification deep-links: react to pendingAction once. For ShowLocation we need the queue
+    // entry (for displayName + zoneName); if the queue no longer contains the photo (e.g. already
+    // skipped or stripped) we synthesise a minimal PendingStrip from the imageId so the location
+    // dialog still opens against the file.
+    LaunchedEffect(pendingAction, items) {
+        when (val action = pendingAction) {
+            is PendingAction.StripPhoto -> {
+                viewModel.requestStripOne(action.imageId)
+                onActionConsumed()
+            }
+            is PendingAction.ShowLocation -> {
+                val existing = items.firstOrNull { it.imageId == action.imageId }
+                locationPreview = existing ?: PendingStrip(
+                    imageId = action.imageId,
+                    contentUri = android.content.ContentUris.withAppendedId(
+                        android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                        action.imageId,
+                    ),
+                    displayName = null,
+                    detectedAt = System.currentTimeMillis(),
+                    zoneName = null,
+                )
+                onActionConsumed()
             }
             null -> Unit
         }

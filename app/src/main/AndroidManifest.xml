@@ -61,6 +61,14 @@
         </receiver>
 
         <receiver
+            android:name=".photo.PhotoActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="dev.whitphx.nolocationzones.action.SKIP" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
             android:name=".geofence.BootReceiver"
             android:exported="true">
             <intent-filter>

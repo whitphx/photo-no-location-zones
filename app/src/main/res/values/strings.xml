@@ -15,10 +15,11 @@
     </plurals>
 
     <string name="review_channel_name">Review pending</string>
-    <string name="review_channel_description">Notifies when photos taken inside a zone are waiting for the GPS strip to be authorized.</string>
-    <string name="review_notification_title">Photos waiting for review</string>
-    <plurals name="review_notification_text">
-        <item quantity="one">%1$d photo with GPS data — tap to authorize stripping.</item>
-        <item quantity="other">%1$d photos with GPS data — tap to authorize stripping.</item>
-    </plurals>
+    <string name="review_channel_description">Per-photo notifications for new photos taken inside a zone.</string>
+    <string name="photo_review_default_title">New photo in zone</string>
+    <string name="photo_review_text_with_zone">Detected in %1$s — choose Strip GPS, Show location, or Skip.</string>
+    <string name="photo_review_text_no_zone">Detected with GPS — choose Strip GPS, Show location, or Skip.</string>
+    <string name="photo_review_action_strip">Strip GPS</string>
+    <string name="photo_review_action_location">Show location</string>
+    <string name="photo_review_action_skip">Skip</string>
 </resources>

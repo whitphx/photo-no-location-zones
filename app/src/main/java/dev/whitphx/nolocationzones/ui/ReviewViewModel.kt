@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.PendingIntent
 import android.provider.MediaStore
 import android.util.Log
+import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -15,6 +16,7 @@ import dev.whitphx.nolocationzones.data.ZoneRepository
 import dev.whitphx.nolocationzones.domain.PendingStrip
 import dev.whitphx.nolocationzones.domain.Zone
 import dev.whitphx.nolocationzones.photo.ExifGpsStripper
+import dev.whitphx.nolocationzones.photo.PhotoActionReceiver
 import dev.whitphx.nolocationzones.photo.PhotoRescanner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -148,7 +150,10 @@ class ReviewViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
             }
-            if (processedIds.isNotEmpty()) pendingRepo.remove(processedIds)
+            if (processedIds.isNotEmpty()) {
+                pendingRepo.remove(processedIds)
+                cancelNotificationsFor(processedIds)
+            }
             _events.value = ReviewEvent.StripCompleted(stripped, skipped, failed)
         }
     }
@@ -160,14 +165,23 @@ class ReviewViewModel(application: Application) : AndroidViewModel(application) 
 
     fun skipAll() {
         viewModelScope.launch {
+            val ids = pendingRepo.getAll().map { it.imageId }
             pendingRepo.clear()
+            cancelNotificationsFor(ids)
         }
     }
 
     fun skipOne(imageId: Long) {
         viewModelScope.launch {
             pendingRepo.remove(listOf(imageId))
+            cancelNotificationsFor(listOf(imageId))
         }
+    }
+
+    private fun cancelNotificationsFor(imageIds: Collection<Long>) {
+        if (imageIds.isEmpty()) return
+        val nm = NotificationManagerCompat.from(getApplication())
+        for (id in imageIds) nm.cancel(PhotoActionReceiver.notificationIdFor(id))
     }
 
     fun requestStripOne(imageId: Long) {
