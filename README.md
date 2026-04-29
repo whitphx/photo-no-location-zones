@@ -153,6 +153,5 @@ First-run setup, in this order:
 - **Map-based zone editing.** Today zones can only be created at the user's current location. A map picker would allow creating zones for places the user is not currently at and dragging existing zones to refine them. Requires Google Maps SDK + an API key.
 - **Per-zone schedules.** "Strip GPS only on weekends at the office" — would require a small scheduler layered on top of the active-zone state.
 - **Video files.** Modifying GPS metadata in `.mp4` requires walking the `udta`/`gps0` boxes; ExifInterface only handles still images.
-- **Per-photo previews in the review screen.** Showing thumbnails (loaded via a small image loader) and an inline GPS preview would make the consent decision more concrete.
 - **Auto-strip option for a Play-Store version.** With `MediaStore.createWriteRequest()` you can pre-collect a session's worth of photos and submit one consent dialog at the moment of a UI-foreground event (e.g. when the user opens the camera app). The current MVP keeps the model deliberately simple: detect, queue, prompt-on-review.
 - **Bulk skip with tombstone.** If the user taps *Skip all*, photos are forgotten but could re-appear if MediaStore rescans. A persistent "skipped" set would prevent that.

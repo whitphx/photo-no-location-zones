@@ -3,6 +3,9 @@ package dev.whitphx.nolocationzones.ui
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,8 +19,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -40,7 +45,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.whitphx.nolocationzones.domain.PendingStrip
@@ -55,6 +64,7 @@ fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
     val snackbar = remember { SnackbarHostState() }
 
     var pendingTargetIds by remember { mutableStateOf<List<Long>>(emptyList()) }
+    var preview: PendingStrip? by remember { mutableStateOf(null) }
 
     val writeAccessLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult(),
@@ -120,6 +130,7 @@ fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
                     items(items, key = { it.imageId }) { item ->
                         PendingRow(
                             item = item,
+                            onClick = { preview = item },
                             onSkip = { viewModel.skipOne(item.imageId) },
                         )
                     }
@@ -140,6 +151,14 @@ fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
                 }
             }
         }
+    }
+
+    preview?.let { item ->
+        PhotoPreviewDialog(
+            uri = item.contentUri,
+            displayName = item.displayName,
+            onDismiss = { preview = null },
+        )
     }
 }
 
@@ -163,12 +182,14 @@ private fun Header(count: Int) {
 }
 
 @Composable
-private fun PendingRow(item: PendingStrip, onSkip: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+private fun PendingRow(item: PendingStrip, onClick: () -> Unit, onSkip: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Thumbnail(item = item, sizeDp = 56.dp)
+            Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     item.displayName ?: "Image ${item.imageId}",
@@ -181,6 +202,11 @@ private fun PendingRow(item: PendingStrip, onSkip: () -> Unit) {
                 Text(
                     "Detected $time$zone",
                     style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    "Tap to preview",
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -202,6 +228,36 @@ private fun EmptyHint(modifier: Modifier = Modifier) {
                 "Photos taken inside a zone will appear here for review.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun Thumbnail(item: PendingStrip, sizeDp: Dp) {
+    val sizePx = with(LocalDensity.current) { sizeDp.roundToPx() }
+    val bitmap = rememberPhotoBitmap(item.contentUri, sizePx)
+    val shape = RoundedCornerShape(8.dp)
+    Box(
+        modifier = Modifier
+            .size(sizeDp)
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap,
+                contentDescription = "Thumbnail of ${item.displayName ?: "image ${item.imageId}"}",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Icon(
+                Icons.Filled.BrokenImage,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(sizeDp / 2),
             )
         }
     }
