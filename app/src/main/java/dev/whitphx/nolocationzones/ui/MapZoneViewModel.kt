@@ -82,6 +82,7 @@ class MapZoneViewModel(
         val loc = runCatching {
             client.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null).await()
         }.getOrNull()
+        val defaultName = "Zone ${zoneRepo.getAll().size + 1}"
         return if (loc != null) {
             MapZoneUiState.Ready(
                 mode = MapZoneUiState.Mode.Create,
@@ -89,7 +90,7 @@ class MapZoneViewModel(
                 initialLatitude = loc.latitude,
                 initialLongitude = loc.longitude,
                 initialRadiusMeters = Zone.DEFAULT_RADIUS_METERS,
-                initialName = "",
+                initialName = defaultName,
                 locationKnown = true,
             )
         } else {
@@ -99,7 +100,7 @@ class MapZoneViewModel(
                 initialLatitude = 0.0,
                 initialLongitude = 0.0,
                 initialRadiusMeters = Zone.DEFAULT_RADIUS_METERS,
-                initialName = "",
+                initialName = defaultName,
                 locationKnown = false,
             )
         }

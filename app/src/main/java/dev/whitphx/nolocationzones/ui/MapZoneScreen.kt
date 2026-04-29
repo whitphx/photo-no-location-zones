@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MyLocation
@@ -43,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -275,26 +278,18 @@ private fun BottomPanel(
             OutlinedTextField(
                 value = name,
                 onValueChange = onNameChange,
-                label = { Text("Zone name (e.g. Home, Office)") },
+                label = { Text("Zone name") },
+                placeholder = { Text("e.g. Home, Office") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(12.dp))
-            Text(
-                "Radius: ${radius.toInt()} m",
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-            )
+            RadiusControl(radius = radius, onRadiusChange = onRadiusChange)
+            Spacer(Modifier.height(4.dp))
             Text(
                 "Tap the map to move the center. Drag the pin to fine-tune.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Slider(
-                value = radius,
-                onValueChange = onRadiusChange,
-                valueRange = Zone.MIN_RADIUS_METERS..Zone.MAX_RADIUS_METERS,
-                steps = 49,
             )
             Spacer(Modifier.height(8.dp))
             Row(
@@ -306,14 +301,69 @@ private fun BottomPanel(
                         Text("Delete")
                     }
                 }
+                // Save is always enabled. The ViewModel falls back to "Zone" if name is blank,
+                // so users who don't care about naming can just tap Save.
                 Button(
                     onClick = onSave,
-                    enabled = name.isNotBlank(),
                     modifier = Modifier.weight(1f),
                 ) { Text("Save") }
             }
         }
     }
+}
+
+/**
+ * Radius slider snapped to 100 m increments, paired with an editable numeric field for exact
+ * values. Slider drives the field; field drives the slider — both bidirectionally.
+ */
+@Composable
+private fun RadiusControl(radius: Float, onRadiusChange: (Float) -> Unit) {
+    val minM = Zone.MIN_RADIUS_METERS.toInt()
+    val maxM = Zone.MAX_RADIUS_METERS.toInt()
+    var radiusText by remember { mutableStateOf(radius.toInt().toString()) }
+
+    // Slider/external -> text: when [radius] changes from outside (slider drag, edit-load),
+    // sync the text field unless the user has typed a value that already matches.
+    LaunchedEffect(radius) {
+        if (radiusText.toIntOrNull()?.toFloat() != radius) {
+            radiusText = radius.toInt().toString()
+        }
+    }
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            "Radius",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+        )
+        OutlinedTextField(
+            value = radiusText,
+            onValueChange = { input ->
+                val cleaned = input.filter(Char::isDigit).take(5)
+                radiusText = cleaned
+                cleaned.toIntOrNull()?.let { v ->
+                    onRadiusChange(v.coerceIn(minM, maxM).toFloat())
+                }
+            },
+            suffix = { Text("m") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.width(120.dp),
+        )
+    }
+    Slider(
+        value = radius,
+        onValueChange = onRadiusChange,
+        // 48 intermediate stops over [100, 5000] = 50 discrete values 100 m apart.
+        valueRange = Zone.MIN_RADIUS_METERS..Zone.MAX_RADIUS_METERS,
+        steps = 48,
+    )
+    Text(
+        "Slider snaps to 100 m steps. Type the field above for an exact value (100–5000 m).",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable
