@@ -120,7 +120,7 @@ Prerequisites:
 - A **Google Maps Android SDK API key** for the map-based zone editor. Create a project in the [Google Cloud Console](https://console.cloud.google.com/), enable *Maps SDK for Android*, generate an API key, and add it to `local.properties`:
 
   ```properties
-  MAPS_API_KEY=AIza_your_key_here
+  MAPS_API_KEY=PASTE_YOUR_GOOGLE_MAPS_API_KEY_HERE
   ```
 
   `local.properties` is gitignored. Without a key the app still builds and runs, but the map view will be blank — every other feature works fine. For a personal-use build, restrict the key to your app's package name + debug-signing SHA-1 fingerprint.
@@ -141,6 +141,33 @@ First-run setup, in this order:
 7. Tap the notification. The review screen lists the photo. Tap **Strip all**, and accept the system's *"Allow this app to modify these photos?"* dialog.
 8. Verify the result with any EXIF viewer — GPS tags should be absent.
 9. Walk outside the zone (or shrink the radius and step away). The **Inside** badge flips to **Outside** and monitoring stops.
+
+## Privacy gaps — what the scrubber does and does NOT cover
+
+The scrubber clears the obvious metadata. There are several places location and identity info can hide that we deliberately don't (or can't) reach yet — anyone using this for serious privacy needs to know about them.
+
+### What we *do* clear
+
+- **All 32 EXIF GPS-IFD fields.** Latitude, longitude, altitude, GPS-timestamp, dest-coordinates, bearing, processing method, area information, datestamp, differential, h-positioning-error, satellites, status, measure-mode, DOP, speed, track, image direction, map datum.
+- **EXIF `MakerNote`.** A vendor-defined binary blob written by Samsung / Apple / Google / etc. that frequently embeds a *duplicate of the GPS coordinates* in proprietary format, plus Wi-Fi SSID at capture time, Apple's per-photo `AssetIdentifier`, scene/face recognition data, and similar. **A scrubber that clears GPS-IFD without clearing `MakerNote` will still resolve to your address in some forensic tools.**
+- **Identifying tags.** `Artist`, `CameraOwnerName`, `BodySerialNumber`, `LensSerialNumber`, `UserComment`, `ImageDescription`. Most camera apps don't fill these — but the ones that do (some Samsung modes, Lightroom imports, photo editors) embed your full name, the camera's unique serial number (which ties multiple photos to the same physical device), or free-form captions that occasionally contain location names.
+- **Post-strip verification.** After save, the file is re-read and the same tag list is checked. Any survivor (e.g. due to a thumbnail-IFD leak or a parser quirk) is logged at WARN level so the gap is visible in `adb logcat -s ExifGpsStripper`.
+- **MediaStore cache.** We call `ContentResolver.notifyChange()` after each successful strip so gallery apps that cache `LATITUDE`/`LONGITUDE` columns flush their cache and re-read.
+
+### What we do NOT clear (yet)
+
+- **Adobe XMP packet.** XMP is an XML-based metadata block embedded in JPEG (a different `APP1` segment from EXIF) and as a separate item in HEIF. AndroidX `ExifInterface` parses EXIF and *preserves XMP byte-for-byte*. XMP commonly carries `Iptc4xmpExt:LocationCreated` / `LocationShown` (location names with country/city/sublocation), `photoshop:City` / `:State` / `:Country`, `dc:creator` (your name), Apple's `apple:ContentIdentifier` for Live Photo grouping, Google's `GCamera:` namespace for Pixel scene metadata, and Samsung's `<MicroVideo>` payload. Stripping XMP requires either rewriting the JPEG container directly (find the XMP `APP1` segment by its `http://ns.adobe.com/xap/1.0/` namespace marker) or pulling in a metadata library. **High-priority follow-up.**
+- **Motion Photo / Live Photo embedded video.** Samsung "Motion Photo", Google "Top Shot", and Apple Live Photos pack a still + an MP4 video into one file (or a paired pair). The MP4 has its own metadata, including GPS in `moov/udta/©xyz` atoms. We only touch the still's EXIF — the MP4's GPS is left intact. **High-priority follow-up.**
+- **IPTC.** A third metadata block sometimes used by photo editors and pro cameras. Same root cause as XMP — `ExifInterface` doesn't parse it. Lower-impact in practice on phones.
+- **Sensor PRNU (Photo Response Non-Uniformity).** Every camera sensor has a unique noise pattern that survives metadata stripping entirely. Forensic software can match a photo to a specific physical camera from pixel statistics alone, with no metadata required. **Not solvable by metadata stripping**; would need re-encoding or noise injection. Out of scope.
+- **Windows `XPTitle` / `XPComment` / `XPAuthor` / `XPKeywords` / `XPSubject`.** AndroidX `ExifInterface` doesn't expose `setAttribute` constants for these tags, so we cannot clear them through this library. They're rarely written by mobile cameras; the practical exposure is photos round-tripped through Windows Explorer's "Tags" UI.
+
+### What we deliberately *keep*
+
+- **`DateTime` / `DateTimeOriginal` / `DateTimeDigitized`** and the corresponding `OffsetTime*` and `SubSecTime*` fields. Useful for chronological sorting, and the user almost always wants them. Note: `OffsetTime` (timezone) is a coarse location proxy ("you were UTC+9") — strip it manually if that matters to you.
+- **`Make`, `Model`, `Software`.** Identifies the device and camera app. Fingerprints your device but is also useful information; left alone by default.
+
+A user who wants the most thorough scrub should run a separate desktop tool (e.g. `exiftool -all=`) on top of this app's output. This app is a "good 80%" pass; it is not a substitute for a careful adversarial-threat-model review.
 
 ## Known limitations and edge cases
 

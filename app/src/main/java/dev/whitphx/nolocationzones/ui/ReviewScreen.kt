@@ -25,6 +25,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -184,6 +187,8 @@ fun ReviewScreen(viewModel: ReviewViewModel, onClose: () -> Unit) {
         ) {
             Spacer(Modifier.height(8.dp))
             RescanCard(rescanning = rescanning, onRescan = { viewModel.rescan(it) })
+            Spacer(Modifier.height(8.dp))
+            ScrubScopeCard()
             Spacer(Modifier.height(8.dp))
             if (items.isEmpty()) {
                 EmptyHint(modifier = Modifier.weight(1f))
@@ -399,6 +404,81 @@ private fun RescanChip(label: String, days: Int, enabled: Boolean, onRescan: (In
         enabled = enabled,
         colors = AssistChipDefaults.assistChipColors(),
     )
+}
+
+/**
+ * User-facing summary of what the strip operation actually does and what it doesn't. Collapsed by
+ * default; expanding reveals the limits a privacy-minded user would want to know about (XMP,
+ * Motion Photo MP4 trailer, IPTC, sensor PRNU). Mirrors the README "Privacy gaps" section.
+ */
+@Composable
+private fun ScrubScopeCard() {
+    var expanded by remember { mutableStateOf(false) }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Outlined.Info,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    "What gets stripped (and what doesn't)",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Icon(
+                    if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (expanded) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Cleared:",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Bullet("All EXIF GPS fields (latitude, longitude, altitude, timestamp, bearing, processing method, etc. — 32 tags total).")
+                Bullet("Camera MakerNote — vendor-specific blob that frequently embeds a duplicate of the GPS coordinates plus Wi-Fi SSIDs and per-photo asset IDs.")
+                Bullet("Identifying tags: Artist, Camera Owner Name, Body/Lens Serial Number, User Comment, Image Description.")
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "NOT cleared (known gaps):",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Bullet("Adobe XMP packet — a separate XML metadata block in JPEG/HEIF that can carry city/country/creator names. Stripping it requires rewriting the container format directly; not yet implemented.")
+                Bullet("Motion Photo / Live Photo embedded MP4 video — the video portion has its own GPS metadata that this scrubber does not touch.")
+                Bullet("IPTC — a third metadata block written by some photo editors, also untouched.")
+                Bullet("Sensor PRNU — every camera's unique noise pattern. Forensic tools can match a photo to a specific physical camera from the pixels alone, regardless of metadata.")
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "See README \"Privacy gaps\" for the full discussion.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun Bullet(text: String) {
+    Row(modifier = Modifier.padding(vertical = 2.dp)) {
+        Text("•  ", style = MaterialTheme.typography.bodySmall)
+        Text(
+            text,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 @Composable
