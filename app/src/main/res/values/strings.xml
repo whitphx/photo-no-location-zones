@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">No-Location Zones</string>
+    <string name="photo_monitor_channel_name">Zone monitoring</string>
+    <string name="photo_monitor_channel_description">Active while inside a no-location zone, watching for new photos to scrub.</string>
+    <string name="photo_monitor_notification_title">Watching for new photos</string>
+    <string name="photo_monitor_notification_text">Inside %1$s — GPS will be removed from new photos.</string>
+    <plurals name="photo_monitor_notification_text_multi">
+        <item quantity="one">Inside %1$d zone — GPS will be removed from new photos.</item>
+        <item quantity="other">Inside %1$d zones — GPS will be removed from new photos.</item>
+    </plurals>
+    <string name="results_channel_name">Strip results</string>
+    <string name="results_channel_description">One-shot notifications when a photo has been scrubbed (or failed).</string>
+</resources>
