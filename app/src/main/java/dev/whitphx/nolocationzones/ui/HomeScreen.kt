@@ -60,6 +60,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -74,6 +75,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.whitphx.nolocationzones.domain.PendingStrip
 import dev.whitphx.nolocationzones.domain.Zone
 import dev.whitphx.nolocationzones.photo.PhotoRescanner
+import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
 
@@ -193,6 +195,10 @@ fun HomeScreen(
     }
 
     val sheetState = rememberBottomSheetScaffoldState()
+    val coroutineScope = rememberCoroutineScope()
+    val expandSheet: () -> Unit = {
+        coroutineScope.launch { sheetState.bottomSheetState.expand() }
+    }
 
     BottomSheetScaffold(
         scaffoldState = sheetState,
@@ -208,7 +214,15 @@ fun HomeScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Whole title row is tappable so the dot is a usable target on mobile.
+                    // Tap → expand the zones sheet (the user's "where am I?" → "show zones").
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .clickable(onClick = expandSheet)
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    ) {
                         StatusIndicator(
                             permissionsAllGranted = permissions.allGranted,
                             activeZoneCount = zoneItems.count { it.isActive },
@@ -569,9 +583,10 @@ private fun Thumbnail(item: PendingStrip, sizeDp: Dp) {
     }
 }
 
-/** Peek height used by [BottomSheetScaffold] in [HomeScreen]. Sized to comfortably show the
- *  drag handle plus the Zones header when collapsed. */
-private val SHEET_PEEK_HEIGHT = 96.dp
+/** Peek height used by [BottomSheetScaffold] in [HomeScreen]. Sized so the drag handle, the
+ *  Zones header, and one zone row are all visible by default — the user gets a hint of the
+ *  list's content without having to drag. */
+private val SHEET_PEEK_HEIGHT = 180.dp
 
 /**
  * Bottom-sheet content. The Material 3 [BottomSheetScaffold] renders its own drag handle above
