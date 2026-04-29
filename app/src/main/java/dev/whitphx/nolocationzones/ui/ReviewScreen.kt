@@ -84,7 +84,7 @@ fun ReviewScreen(
 
     var pendingTargetIds by remember { mutableStateOf<List<Long>>(emptyList()) }
     var preview: PendingStrip? by remember { mutableStateOf(null) }
-    var locationPreview: PendingStrip? by remember { mutableStateOf(null) }
+    var previewTab: PhotoDetailTab by remember { mutableStateOf(PhotoDetailTab.Photo) }
     var skipAllConfirm by remember { mutableStateOf(false) }
     var sortMenuOpen by remember { mutableStateOf(false) }
     val zones by viewModel.zones.collectAsStateWithLifecycle()
@@ -141,7 +141,7 @@ fun ReviewScreen(
     // Notification deep-links: react to pendingAction once. For ShowLocation we need the queue
     // entry (for displayName + zoneName); if the queue no longer contains the photo (e.g. already
     // skipped or stripped) we synthesise a minimal PendingStrip from the imageId so the location
-    // dialog still opens against the file.
+    // tab still opens against the file.
     LaunchedEffect(pendingAction, items) {
         when (val action = pendingAction) {
             is PendingAction.StripPhoto -> {
@@ -150,7 +150,7 @@ fun ReviewScreen(
             }
             is PendingAction.ShowLocation -> {
                 val existing = items.firstOrNull { it.imageId == action.imageId }
-                locationPreview = existing ?: PendingStrip(
+                preview = existing ?: PendingStrip(
                     imageId = action.imageId,
                     contentUri = android.content.ContentUris.withAppendedId(
                         android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
@@ -160,6 +160,7 @@ fun ReviewScreen(
                     detectedAt = System.currentTimeMillis(),
                     zoneName = null,
                 )
+                previewTab = PhotoDetailTab.Location
                 onActionConsumed()
             }
             null -> Unit
@@ -235,8 +236,14 @@ fun ReviewScreen(
                     items(items, key = { it.imageId }) { item ->
                         PendingRow(
                             item = item,
-                            onClick = { preview = item },
-                            onShowLocation = { locationPreview = item },
+                            onClick = {
+                                preview = item
+                                previewTab = PhotoDetailTab.Photo
+                            },
+                            onShowLocation = {
+                                preview = item
+                                previewTab = PhotoDetailTab.Location
+                            },
                             onStrip = { viewModel.requestStripOne(item.imageId) },
                             onSkip = { viewModel.skipOne(item.imageId) },
                         )
@@ -289,27 +296,17 @@ fun ReviewScreen(
     preview?.let { item ->
         PhotoDetailDialog(
             item = item,
+            zones = zones,
+            initialTab = previewTab,
             onDismiss = { preview = null },
             onStrip = {
                 viewModel.requestStripOne(item.imageId)
                 preview = null
             },
-            onShowLocation = { locationPreview = item },
             onSkip = {
                 viewModel.skipOne(item.imageId)
                 preview = null
             },
-        )
-    }
-
-    // Stacks on top of PhotoDetailDialog when launched from there. Dismissing it just unmounts
-    // this dialog; the detail dialog underneath remains visible.
-    locationPreview?.let { item ->
-        LocationPreviewDialog(
-            uri = item.contentUri,
-            displayName = item.displayName,
-            zones = zones,
-            onDismiss = { locationPreview = null },
         )
     }
 }
