@@ -40,6 +40,7 @@ import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -118,6 +119,14 @@ fun HomeScreen(
     var pendingDelete: Zone? by remember { mutableStateOf(null) }
     var sortMenuOpen by remember { mutableStateOf(false) }
     var rescanMenuOpen by remember { mutableStateOf(false) }
+    var selectedIds: Set<Long> by remember { mutableStateOf(emptySet()) }
+
+    // Prune selection when items disappear (strip success / skip / external delete).
+    LaunchedEffect(items) {
+        val present = items.mapTo(HashSet(items.size)) { it.imageId }
+        val pruned = selectedIds.filter { it in present }.toSet()
+        if (pruned.size != selectedIds.size) selectedIds = pruned
+    }
 
     val writeAccessLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult(),
@@ -342,6 +351,14 @@ fun HomeScreen(
                             items(items, key = { it.imageId }) { item ->
                                 PendingRow(
                                     item = item,
+                                    selected = item.imageId in selectedIds,
+                                    onSelectedChange = { checked ->
+                                        selectedIds = if (checked) {
+                                            selectedIds + item.imageId
+                                        } else {
+                                            selectedIds - item.imageId
+                                        }
+                                    },
                                     onClick = { preview = item },
                                     onStrip = { reviewViewModel.requestStripOne(item.imageId) },
                                     onSkip = { reviewViewModel.skipOne(item.imageId) },
@@ -354,6 +371,8 @@ fun HomeScreen(
             }
 
             if (permissions.allGranted && items.isNotEmpty()) {
+                val selectionMode = selectedIds.isNotEmpty()
+                val selectionCount = selectedIds.size
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -361,13 +380,30 @@ fun HomeScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     OutlinedButton(
-                        onClick = { skipAllConfirm = true },
+                        onClick = {
+                            if (selectionMode) {
+                                reviewViewModel.skipFor(selectedIds.toList())
+                                selectedIds = emptySet()
+                            } else {
+                                skipAllConfirm = true
+                            }
+                        },
                         modifier = Modifier.weight(1f),
-                    ) { Text("Skip all") }
+                    ) {
+                        Text(if (selectionMode) "Skip ($selectionCount)" else "Skip all")
+                    }
                     Button(
-                        onClick = { reviewViewModel.requestStripAll() },
+                        onClick = {
+                            if (selectionMode) {
+                                reviewViewModel.requestStripFor(selectedIds.toList())
+                            } else {
+                                reviewViewModel.requestStripAll()
+                            }
+                        },
                         modifier = Modifier.weight(1f),
-                    ) { Text("Strip all") }
+                    ) {
+                        Text(if (selectionMode) "Strip GPS ($selectionCount)" else "Strip all")
+                    }
                 }
             }
         }
@@ -502,18 +538,31 @@ private fun RescanProgressRow() {
 @Composable
 private fun PendingRow(
     item: PendingStrip,
+    selected: Boolean,
+    onSelectedChange: (Boolean) -> Unit,
     onClick: () -> Unit,
     onStrip: () -> Unit,
     onSkip: () -> Unit,
 ) {
-    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        colors = if (selected) {
+            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+        } else {
+            CardDefaults.cardColors()
+        },
+    ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Checkbox(
+                checked = selected,
+                onCheckedChange = onSelectedChange,
+            )
             Thumbnail(item = item, sizeDp = 56.dp)
             Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
+            Column(modifier = Modifier.weight(1f).padding(vertical = 12.dp)) {
                 Text(
                     item.displayName ?: "Image ${item.imageId}",
                     style = MaterialTheme.typography.bodyMedium,

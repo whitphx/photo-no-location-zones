@@ -107,23 +107,38 @@ class ReviewViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * Step 1: ask the system for write permission on every URI. We pass the PendingIntent up to the
-     * activity so the activity can launch it with [androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult].
+     * Step 1: ask the system for write permission on every URI. We pass the PendingIntent up to
+     * the activity so the activity can launch it with
+     * [androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult].
      */
     fun requestStripAll() {
         viewModelScope.launch {
-            val items = pendingRepo.getAll()
-            if (items.isEmpty()) return@launch
-            try {
-                val intent = MediaStore.createWriteRequest(
-                    getApplication<Application>().contentResolver,
-                    items.map { it.contentUri },
-                )
-                _events.value = ReviewEvent.RequestWriteAccess(intent, items.map { it.imageId })
-            } catch (t: Throwable) {
-                Log.e(TAG, "createWriteRequest failed", t)
-                _events.value = ReviewEvent.Error(t.message ?: "Couldn't request write access")
-            }
+            requestStripForItems(pendingRepo.getAll())
+        }
+    }
+
+    /** Like [requestStripAll] but limited to a specific set of image IDs (e.g. user selection). */
+    fun requestStripFor(imageIds: Collection<Long>) {
+        if (imageIds.isEmpty()) return
+        viewModelScope.launch {
+            val ids = imageIds.toSet()
+            requestStripForItems(pendingRepo.getAll().filter { it.imageId in ids })
+        }
+    }
+
+    fun requestStripOne(imageId: Long) = requestStripFor(listOf(imageId))
+
+    private fun requestStripForItems(items: List<PendingStrip>) {
+        if (items.isEmpty()) return
+        try {
+            val intent = MediaStore.createWriteRequest(
+                getApplication<Application>().contentResolver,
+                items.map { it.contentUri },
+            )
+            _events.value = ReviewEvent.RequestWriteAccess(intent, items.map { it.imageId })
+        } catch (t: Throwable) {
+            Log.e(TAG, "createWriteRequest failed", t)
+            _events.value = ReviewEvent.Error(t.message ?: "Couldn't request write access")
         }
     }
 
@@ -179,33 +194,22 @@ class ReviewViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun skipOne(imageId: Long) {
+    /** Skip a specific set of image IDs (e.g. the user's checked selection). */
+    fun skipFor(imageIds: Collection<Long>) {
+        if (imageIds.isEmpty()) return
         viewModelScope.launch {
-            pendingRepo.remove(listOf(imageId))
-            cancelNotificationsFor(listOf(imageId))
+            val list = imageIds.toList()
+            pendingRepo.remove(list)
+            cancelNotificationsFor(list)
         }
     }
+
+    fun skipOne(imageId: Long) = skipFor(listOf(imageId))
 
     private fun cancelNotificationsFor(imageIds: Collection<Long>) {
         if (imageIds.isEmpty()) return
         val nm = NotificationManagerCompat.from(getApplication())
         for (id in imageIds) nm.cancel(PhotoActionReceiver.notificationIdFor(id))
-    }
-
-    fun requestStripOne(imageId: Long) {
-        viewModelScope.launch {
-            val item = pendingRepo.getAll().firstOrNull { it.imageId == imageId } ?: return@launch
-            try {
-                val intent = MediaStore.createWriteRequest(
-                    getApplication<Application>().contentResolver,
-                    listOf(item.contentUri),
-                )
-                _events.value = ReviewEvent.RequestWriteAccess(intent, listOf(imageId))
-            } catch (t: Throwable) {
-                Log.e(TAG, "createWriteRequest (single) failed", t)
-                _events.value = ReviewEvent.Error(t.message ?: "Couldn't request write access")
-            }
-        }
     }
 
     fun rescan(daysBack: Int = PhotoRescanner.DEFAULT_DAYS_BACK) {
