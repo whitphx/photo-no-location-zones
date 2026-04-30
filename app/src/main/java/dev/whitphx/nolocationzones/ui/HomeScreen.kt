@@ -44,6 +44,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -71,6 +72,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -119,7 +121,6 @@ fun HomeScreen(
     var preview: PendingStrip? by remember { mutableStateOf(null) }
     var skipAllConfirm by remember { mutableStateOf(false) }
     var pendingDelete: Zone? by remember { mutableStateOf(null) }
-    var sortMenuOpen by remember { mutableStateOf(false) }
     var rescanMenuOpen by remember { mutableStateOf(false) }
     var selectedIds: Set<Long> by remember { mutableStateOf(emptySet()) }
 
@@ -248,32 +249,6 @@ fun HomeScreen(
                     }
                 },
                 actions = {
-                    if (items.isNotEmpty()) {
-                        IconButton(onClick = { sortMenuOpen = true }) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.Sort,
-                                contentDescription = "Sort photos",
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = sortMenuOpen,
-                            onDismissRequest = { sortMenuOpen = false },
-                        ) {
-                            SortBy.entries.forEach { option ->
-                                DropdownMenuItem(
-                                    text = { Text(option.label) },
-                                    leadingIcon = if (option == sortBy) {
-                                        { Icon(Icons.Filled.Check, contentDescription = null) }
-                                    } else null,
-                                    onClick = {
-                                        reviewViewModel.setSortBy(option)
-                                        sortMenuOpen = false
-                                    },
-                                )
-                            }
-                        }
-                    }
-
                     IconButton(
                         onClick = { rescanMenuOpen = true },
                         enabled = !rescanning,
@@ -350,6 +325,22 @@ fun HomeScreen(
                         ) {
                             item { Spacer(Modifier.height(8.dp)) }
                             if (rescanning) item { RescanProgressRow() }
+                            item {
+                                PhotoListHeader(
+                                    selectionMode = selectedIds.isNotEmpty(),
+                                    selectedCount = selectedIds.size,
+                                    totalCount = items.size,
+                                    onToggleSelectAll = { selectAll ->
+                                        selectedIds = if (selectAll) {
+                                            items.mapTo(HashSet(items.size)) { it.imageId }
+                                        } else {
+                                            emptySet()
+                                        }
+                                    },
+                                    sortBy = sortBy,
+                                    onSortByChange = { reviewViewModel.setSortBy(it) },
+                                )
+                            }
                             items(items, key = { it.imageId }) { item ->
                                 PendingRow(
                                     item = item,
@@ -517,6 +508,66 @@ private fun EmptyPhotoListHint(
                 } else {
                     Text("Rescan past photos")
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Header above the photo list. The sort widget always lives here. In selection mode the row
+ * grows a tri-state global checkbox plus a "N selected" count.
+ */
+@Composable
+private fun PhotoListHeader(
+    selectionMode: Boolean,
+    selectedCount: Int,
+    totalCount: Int,
+    onToggleSelectAll: (Boolean) -> Unit,
+    sortBy: SortBy,
+    onSortByChange: (SortBy) -> Unit,
+) {
+    var sortMenuOpen by remember { mutableStateOf(false) }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (selectionMode) {
+            val state = when {
+                selectedCount == 0 -> ToggleableState.Off
+                selectedCount >= totalCount -> ToggleableState.On
+                else -> ToggleableState.Indeterminate
+            }
+            TriStateCheckbox(
+                state = state,
+                onClick = { onToggleSelectAll(state != ToggleableState.On) },
+            )
+            Text(
+                "$selectedCount selected",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
+        } else {
+            Spacer(Modifier.width(16.dp))
+        }
+        Spacer(Modifier.weight(1f))
+        IconButton(onClick = { sortMenuOpen = true }) {
+            Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort photos")
+        }
+        DropdownMenu(
+            expanded = sortMenuOpen,
+            onDismissRequest = { sortMenuOpen = false },
+        ) {
+            SortBy.entries.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option.label) },
+                    leadingIcon = if (option == sortBy) {
+                        { Icon(Icons.Filled.Check, contentDescription = null) }
+                    } else null,
+                    onClick = {
+                        onSortByChange(option)
+                        sortMenuOpen = false
+                    },
+                )
             }
         }
     }
