@@ -1,0 +1,76 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Build, deploy, and test
+
+Toolchain: JDK 17, Kotlin 2.3.20, AGP 9, `compileSdk 36`, `minSdk 30`, `targetSdk 36`. The Gradle wrapper enforces JDK 17 via `kotlin { jvmToolchain(17) }`.
+
+```sh
+./gradlew :app:assembleDebug                  # build debug APK
+./gradlew :app:lintDebug                      # Android lint
+./gradlew test                                # JVM unit tests (currently none)
+./gradlew :app:connectedAndroidTest           # instrumented tests on a connected device
+android run --apks=app/build/outputs/apk/debug/app-debug.apk   # deploy to connected device
+```
+
+A **`Stop` hook** in `.claude/settings.json` runs `./gradlew :app:assembleDebug && android run --apks=...` automatically after every agent turn. Don't manually build/deploy unless you're debugging that flow itself or the hook is disabled. Hook timeout is 600s; the auto-build may dominate turn time.
+
+The map-based zone editor needs a Google Maps Android SDK key. Set it in `local.properties` (gitignored):
+```
+MAPS_API_KEY=<key>
+```
+Without a key the app builds and runs, but `MapZoneScreen` shows a blank map.
+
+## Architecture invariants
+
+The high-level diagram lives in `README.md` ("Architecture" section). The notes below are the non-obvious rules a change must respect.
+
+### Detection vs. modification — never collapse the two
+
+The geofence-triggered `PhotoMonitorService` only **observes and queues** newly captured photos. It must never write to a file. Writes are *exclusively* gated by `MediaStore.createWriteRequest()` and the system consent dialog — `ReviewViewModel` raises a `RequestWriteAccess` event, `MainActivity` launches it via `StartIntentSenderForResult`, and only on success does `ExifGpsStripper.strip()` run on the granted URIs. Bypassing this is a privacy regression and breaks the safety story in the README.
+
+### Foreground service start path is constrained
+
+`PhotoMonitorService` (`foregroundServiceType="location"`) may only be started from the geofence ENTER `BroadcastReceiver`. That broadcast is one of the documented exemptions to Android 12+'s foreground-service-from-background restrictions. Starting it from arbitrary code paths (e.g., a UI button, an unrelated receiver) will throw `ForegroundServiceStartNotAllowedException` on real devices. If you need to "kick" monitoring for testing, fire a synthetic geofence ENTER, don't call `startForegroundService` directly.
+
+### Geofence registration is non-durable
+
+Geofences live in Play Services state and are wiped on reboot, on app reinstall, and silently after a few days of "background usage limits" on some Samsung devices. `BootReceiver` re-registers on `ACTION_BOOT_COMPLETED` and `ACTION_MY_PACKAGE_REPLACED`; `MainViewModel.resyncGeofences()` (wired to a button in `SettingsScreen`) is the manual escape hatch. Any change to `ZoneRepository` add/delete must keep `GeofenceController` in sync — the controller is the one place that owns the Play Services registration.
+
+### `ZoneStateStore` is the source of truth for "inside any zone"
+
+`GeofenceBroadcastReceiver` writes ENTER/EXIT into `ZoneStateStore` (DataStore). UI status indicators, the foreground service start/stop decision, and the badge in `HomeScreen` all read from there. Don't add a parallel piece of state.
+
+### EXIF stripping is GPS-IFD-aware, not a full metadata wipe
+
+`ExifGpsStripper` clears the 32 GPS-IFD fields plus a curated identifying-tags list (see `README.md` "Privacy gaps"). It does **not** touch:
+- **XMP** — `androidx.exifinterface` preserves the XMP `APP1` segment byte-for-byte. XMP often duplicates location info (`Iptc4xmpExt:LocationCreated`, `photoshop:City`, etc.).
+- **Motion Photo / Live Photo embedded video** — only the still's EXIF is rewritten; the embedded MP4's `udta/©xyz` GPS atom is untouched.
+- **IPTC**, **Windows XP\* tags**, **sensor PRNU**.
+
+If you change `ExifGpsStripper`, also update `README.md` "Privacy gaps" — it is the user-facing contract for what the scrubber does and doesn't cover.
+
+### Manual DI through `App.container`
+
+There is no Hilt. `AppContainer` (`di/AppContainer.kt`) is constructed once in `App.onCreate()` and exposes singletons (`ZoneRepository`, `PendingStripRepository`, `PhotoRescanner`, `PendingStripReconciler`, `ZoneStateStore`, `GeofenceController`). ViewModels obtain dependencies via `application as App` then `app.container`. Don't introduce a DI framework for a single new class.
+
+### Notification action plumbing
+
+The per-photo review notification has three actions (`PhotoMonitorService.kt:228-230`):
+- **Strip GPS** → `MainActivity` with `ACTION_STRIP_PHOTO` (deep-link, surfaces the system consent dialog)
+- **Show location** → `MainActivity` with `ACTION_SHOW_LOCATION` (opens `PhotoDetailDialog`)
+- **Skip** → `PhotoActionReceiver` (silent broadcast, no UI)
+
+`MainActivity.applyIntent` translates these into a `NavSignal` (`ui/AppNavHost.kt`) backed by `mutableStateOf` so writes from `onNewIntent` re-trigger the Compose `LaunchedEffect`. Plain `var` will not work.
+
+### `minSdk = 30` is intentional
+
+Below Android 11, scoped storage rules diverge dramatically and the app would need a parallel legacy storage path. Don't lower the floor without revisiting the storage code.
+
+## Conventions specific to this codebase
+
+- **Single-activity Compose nav** via a hand-rolled `AppNavHost` (`Screen` sealed interface, `rememberSaveable` with a custom `Saver`). Don't pull in `androidx.navigation` for three destinations.
+- **No backwards-compatibility shims** for the legacy density-bucket launcher icons; only `mipmap-anydpi-v26/` adaptive icons exist (minSdk 30 → adaptive is always used).
+- **Vector drawables can't render `strokeDashArray`** — the SVG branding sources in `branding/` keep dashes for the README, but `ic_launcher_foreground.xml` renders the geofence ring as a solid stroke.
+- The README's "Architecture" diagram and "Privacy gaps" tables are user-facing contracts. Keep them in sync with code changes that affect them.
