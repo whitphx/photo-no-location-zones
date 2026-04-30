@@ -119,8 +119,8 @@ fun HomeScreen(
 
     var pendingTargetIds by remember { mutableStateOf<List<Long>>(emptyList()) }
     var preview: PendingStrip? by remember { mutableStateOf(null) }
-    var skipAllConfirm by remember { mutableStateOf(false) }
     var pendingDelete: Zone? by remember { mutableStateOf(null) }
+    var sortMenuOpen by remember { mutableStateOf(false) }
     var rescanMenuOpen by remember { mutableStateOf(false) }
     var selectedIds: Set<Long> by remember { mutableStateOf(emptySet()) }
 
@@ -249,6 +249,31 @@ fun HomeScreen(
                     }
                 },
                 actions = {
+                    if (items.isNotEmpty()) {
+                        IconButton(onClick = { sortMenuOpen = true }) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Sort,
+                                contentDescription = "Sort photos",
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = sortMenuOpen,
+                            onDismissRequest = { sortMenuOpen = false },
+                        ) {
+                            SortBy.entries.forEach { option ->
+                                DropdownMenuItem(
+                                    text = { Text(option.label) },
+                                    leadingIcon = if (option == sortBy) {
+                                        { Icon(Icons.Filled.Check, contentDescription = null) }
+                                    } else null,
+                                    onClick = {
+                                        reviewViewModel.setSortBy(option)
+                                        sortMenuOpen = false
+                                    },
+                                )
+                            }
+                        }
+                    }
                     IconButton(
                         onClick = { rescanMenuOpen = true },
                         enabled = !rescanning,
@@ -316,31 +341,38 @@ fun HomeScreen(
                         rescanning = rescanning,
                         onRescan = { reviewViewModel.rescan(PhotoRescanner.DEFAULT_DAYS_BACK) },
                     )
-                    else -> {
+                    else -> Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp),
+                    ) {
+                        // Selection-mode header — pinned, does not scroll. Hidden otherwise.
+                        if (selectedIds.isNotEmpty()) {
+                            PhotoListHeader(
+                                selectedCount = selectedIds.size,
+                                totalCount = items.size,
+                                onToggleSelectAll = { selectAll ->
+                                    selectedIds = if (selectAll) {
+                                        items.mapTo(HashSet(items.size)) { it.imageId }
+                                    } else {
+                                        emptySet()
+                                    }
+                                },
+                                onSkipSelected = {
+                                    reviewViewModel.skipFor(selectedIds.toList())
+                                    selectedIds = emptySet()
+                                },
+                                onStripSelected = {
+                                    reviewViewModel.requestStripFor(selectedIds.toList())
+                                },
+                            )
+                        }
+                        if (rescanning) RescanProgressRow()
                         LazyColumn(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 16.dp),
+                            modifier = Modifier.weight(1f),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            item { Spacer(Modifier.height(8.dp)) }
-                            if (rescanning) item { RescanProgressRow() }
-                            item {
-                                PhotoListHeader(
-                                    selectionMode = selectedIds.isNotEmpty(),
-                                    selectedCount = selectedIds.size,
-                                    totalCount = items.size,
-                                    onToggleSelectAll = { selectAll ->
-                                        selectedIds = if (selectAll) {
-                                            items.mapTo(HashSet(items.size)) { it.imageId }
-                                        } else {
-                                            emptySet()
-                                        }
-                                    },
-                                    sortBy = sortBy,
-                                    onSortByChange = { reviewViewModel.setSortBy(it) },
-                                )
-                            }
+                            item { Spacer(Modifier.height(4.dp)) }
                             items(items, key = { it.imageId }) { item ->
                                 PendingRow(
                                     item = item,
@@ -364,42 +396,6 @@ fun HomeScreen(
                 }
             }
 
-            if (permissions.allGranted && items.isNotEmpty()) {
-                val selectionMode = selectedIds.isNotEmpty()
-                val selectionCount = selectedIds.size
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            if (selectionMode) {
-                                reviewViewModel.skipFor(selectedIds.toList())
-                                selectedIds = emptySet()
-                            } else {
-                                skipAllConfirm = true
-                            }
-                        },
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text(if (selectionMode) "Skip ($selectionCount)" else "Skip all")
-                    }
-                    Button(
-                        onClick = {
-                            if (selectionMode) {
-                                reviewViewModel.requestStripFor(selectedIds.toList())
-                            } else {
-                                reviewViewModel.requestStripAll()
-                            }
-                        },
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text(if (selectionMode) "Strip GPS ($selectionCount)" else "Strip all")
-                    }
-                }
-            }
         }
     }
 
@@ -416,28 +412,6 @@ fun HomeScreen(
             },
             dismissButton = {
                 TextButton(onClick = { pendingDelete = null }) { Text("Cancel") }
-            },
-        )
-    }
-
-    if (skipAllConfirm) {
-        AlertDialog(
-            onDismissRequest = { skipAllConfirm = false },
-            title = { Text("Skip all ${items.size} photos?") },
-            text = {
-                Text(
-                    "They will be removed from the queue. You can re-find them with Rescan if " +
-                        "they are still on the device.",
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    reviewViewModel.skipAll()
-                    skipAllConfirm = false
-                }) { Text("Skip all") }
-            },
-            dismissButton = {
-                TextButton(onClick = { skipAllConfirm = false }) { Text("Cancel") }
             },
         )
     }
@@ -514,62 +488,45 @@ private fun EmptyPhotoListHint(
 }
 
 /**
- * Header above the photo list. The sort widget always lives here. In selection mode the row
- * grows a tri-state global checkbox plus a "N selected" count.
+ * Selection-mode header pinned above the photo list. Tri-state global checkbox plus the count
+ * on the left, bulk actions ("Skip selected" / "Strip GPS selected") on the right. Only
+ * rendered when there is at least one selected item — caller gates this composable.
  */
 @Composable
 private fun PhotoListHeader(
-    selectionMode: Boolean,
     selectedCount: Int,
     totalCount: Int,
     onToggleSelectAll: (Boolean) -> Unit,
-    sortBy: SortBy,
-    onSortByChange: (SortBy) -> Unit,
+    onSkipSelected: () -> Unit,
+    onStripSelected: () -> Unit,
 ) {
-    var sortMenuOpen by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (selectionMode) {
-            val state = when {
-                selectedCount == 0 -> ToggleableState.Off
-                selectedCount >= totalCount -> ToggleableState.On
-                else -> ToggleableState.Indeterminate
-            }
-            TriStateCheckbox(
-                state = state,
-                onClick = { onToggleSelectAll(state != ToggleableState.On) },
-            )
-            Text(
-                "$selectedCount selected",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-            )
-        } else {
-            Spacer(Modifier.width(16.dp))
+        val state = when {
+            selectedCount == 0 -> ToggleableState.Off
+            selectedCount >= totalCount -> ToggleableState.On
+            else -> ToggleableState.Indeterminate
         }
+        TriStateCheckbox(
+            state = state,
+            onClick = { onToggleSelectAll(state != ToggleableState.On) },
+        )
+        Text(
+            "$selectedCount",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+        )
         Spacer(Modifier.weight(1f))
-        IconButton(onClick = { sortMenuOpen = true }) {
-            Icon(Icons.AutoMirrored.Filled.Sort, contentDescription = "Sort photos")
-        }
-        DropdownMenu(
-            expanded = sortMenuOpen,
-            onDismissRequest = { sortMenuOpen = false },
-        ) {
-            SortBy.entries.forEach { option ->
-                DropdownMenuItem(
-                    text = { Text(option.label) },
-                    leadingIcon = if (option == sortBy) {
-                        { Icon(Icons.Filled.Check, contentDescription = null) }
-                    } else null,
-                    onClick = {
-                        onSortByChange(option)
-                        sortMenuOpen = false
-                    },
-                )
-            }
-        }
+        TextButton(
+            onClick = onSkipSelected,
+            contentPadding = PaddingValues(horizontal = 8.dp),
+        ) { Text("Skip selected") }
+        TextButton(
+            onClick = onStripSelected,
+            contentPadding = PaddingValues(horizontal = 8.dp),
+        ) { Text("Strip GPS selected") }
     }
 }
 
