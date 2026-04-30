@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -67,6 +68,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -505,34 +507,38 @@ private fun PendingRow(
     onSkip: () -> Unit,
 ) {
     Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
-        Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Thumbnail(item = item, sizeDp = 56.dp)
-                Spacer(Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        item.displayName ?: "Image ${item.imageId}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    val zone = item.zoneName?.let { " · $it" } ?: ""
-                    val timestamp = if (item.dateTakenMs > 0L) item.dateTakenMs else item.detectedAt
-                    Text(
-                        text = "${formatTimestamp(timestamp)}$zone",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Thumbnail(item = item, sizeDp = 56.dp)
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    item.displayName ?: "Image ${item.imageId}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                val zone = item.zoneName?.let { " · $it" } ?: ""
+                val timestamp = if (item.dateTakenMs > 0L) item.dateTakenMs else item.detectedAt
+                Text(
+                    text = "${formatTimestamp(timestamp)}$zone",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-            Spacer(Modifier.height(4.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                TextButton(onClick = onSkip) { Text("Skip") }
-                Spacer(Modifier.width(4.dp))
-                TextButton(onClick = onStrip) { Text("Strip GPS") }
-            }
+            TextButton(
+                onClick = onSkip,
+                contentPadding = PaddingValues(horizontal = 8.dp),
+            ) { Text("Skip") }
+            TextButton(
+                onClick = onStrip,
+                contentPadding = PaddingValues(horizontal = 8.dp),
+            ) { Text("Strip GPS") }
         }
     }
 }
