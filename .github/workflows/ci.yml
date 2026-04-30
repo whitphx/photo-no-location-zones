@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Lint, test, assemble
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Write Maps API key (optional)
+        env:
+          MAPS_API_KEY: ${{ secrets.MAPS_API_KEY }}
+        run: |
+          if [ -n "$MAPS_API_KEY" ]; then
+            echo "MAPS_API_KEY=$MAPS_API_KEY" > local.properties
+          fi
+
+      - name: Android lint
+        run: ./gradlew :app:lintDebug
+
+      - name: Unit tests
+        run: ./gradlew test
+
+      - name: Assemble debug APK
+        run: ./gradlew :app:assembleDebug
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore
+          retention-days: 30
+
+  release:
+    name: GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download debug APK
+        uses: actions/download-artifact@v4
+        with:
+          name: app-debug
+          path: artifacts
+
+      - name: Rename APK with tag
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: mv artifacts/app-debug.apk "artifacts/app-${TAG_NAME}-debug.apk"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/app-*-debug.apk
+          generate_release_notes: true
+          fail_on_unmatched_files: true
