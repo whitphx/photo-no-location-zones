@@ -5,9 +5,11 @@ import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -351,6 +353,7 @@ fun HomeScreen(
                             items(items, key = { it.imageId }) { item ->
                                 PendingRow(
                                     item = item,
+                                    selectionMode = selectedIds.isNotEmpty(),
                                     selected = item.imageId in selectedIds,
                                     onSelectedChange = { checked ->
                                         selectedIds = if (checked) {
@@ -535,17 +538,29 @@ private fun RescanProgressRow() {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PendingRow(
     item: PendingStrip,
+    selectionMode: Boolean,
     selected: Boolean,
     onSelectedChange: (Boolean) -> Unit,
     onClick: () -> Unit,
     onStrip: () -> Unit,
     onSkip: () -> Unit,
 ) {
+    // Tap behaviour follows the Gmail / Files pattern:
+    //  - Out of selection mode: tap → preview, long-press → enter selection mode (selects this row).
+    //  - In selection mode:    tap → toggle this row, long-press → also toggles (cheap shortcut).
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = {
+                    if (selectionMode) onSelectedChange(!selected) else onClick()
+                },
+                onLongClick = { onSelectedChange(!selected) },
+            ),
         colors = if (selected) {
             CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
         } else {
@@ -556,10 +571,15 @@ private fun PendingRow(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Checkbox(
-                checked = selected,
-                onCheckedChange = onSelectedChange,
-            )
+            // Checkbox is hidden until selection mode kicks in, then it appears on every row.
+            if (selectionMode) {
+                Checkbox(
+                    checked = selected,
+                    onCheckedChange = onSelectedChange,
+                )
+            } else {
+                Spacer(Modifier.width(12.dp))
+            }
             Thumbnail(item = item, sizeDp = 56.dp)
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f).padding(vertical = 12.dp)) {
