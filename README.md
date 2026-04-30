@@ -14,14 +14,15 @@ The stock camera app still runs, which means computational-photography features 
 ## Architecture
 
 ```
-                   ┌─────────────────────────────────────┐
-                   │  Compose UI                          │
-                   │  • ZoneListScreen + ReviewBanner     │
-                   │  • MapZoneScreen (create + edit)     │
-                   │  • ReviewScreen (createWriteRequest) │
-                   │  • PermissionsCard                   │
-                   │  • Main / MapZone / Review VMs       │
-                   └──────────────┬──────────────────────┘
+                   ┌────────────────────────────────────────┐
+                   │  Compose UI                             │
+                   │  • HomeScreen (status + photo queue +   │
+                   │    zones bottom sheet + PermissionsCard)│
+                   │  • MapZoneScreen (create + edit)        │
+                   │  • SettingsScreen                       │
+                   │  • PhotoDetailDialog, FaqCard           │
+                   │  • Main / MapZone / Review VMs          │
+                   └──────────────┬─────────────────────────┘
                                   │ creates / deletes zones
                                   ▼
        ┌───────────────────┐   ┌──────────────────────────┐
@@ -50,13 +51,16 @@ The stock camera app still runs, which means computational-photography features 
                            │ ContentObserver ─► scan ─►│ (no-GPS photos: drop)
                            │                          │ (GPS photos: enqueue)
                            └────────────┬──────────────┘
-                                        │ post review notification
+                                        │ post per-photo notification
                                         ▼
                            ┌───────────────────────────┐
-                           │ Review notification       │
-                           │  ──tap──►  ReviewScreen   │
+                           │ Per-photo notification    │
+                           │  tap body  ─► HomeScreen  │
+                           │  "Strip GPS"  ─► MainActivity (deep-link)
+                           │  "Show location" ─► MainActivity
+                           │  "Skip" ─► PhotoActionReceiver (silent)
                            │                           │
-                           │  user taps "Strip all"    │
+                           │  on strip:                │
                            │  ─►  MediaStore           │
                            │       .createWriteRequest │
                            │  ─►  system consent       │
@@ -73,15 +77,20 @@ The stock camera app still runs, which means computational-photography features 
 ```
 dev.whitphx.nolocationzones
 ├── App.kt                  Application + notification channels + DI root
-├── MainActivity.kt         Single Compose-hosting activity; honors OPEN_REVIEW deep link
+├── MainActivity.kt         Single Compose-hosting activity; honors OPEN_REVIEW /
+│                           STRIP_PHOTO / SHOW_LOCATION deep-link intents
 ├── di/AppContainer.kt      Manual singleton DI (no Hilt — too much glue for 5 deps)
 ├── domain/                 Zone, PendingStrip
 ├── data/                   Room (zones, pending_strips) + DataStore (active-zone state, last-seen photo id)
 ├── geofence/               GeofenceController, BroadcastReceiver, BootReceiver
-├── photo/                  PhotoMonitorService (detect+queue), ExifGpsStripper (URI-based)
-├── permissions/            Snapshot reader for runtime permissions
+├── photo/                  PhotoMonitorService (detect+queue), ExifGpsStripper /
+│                           ExifGpsReader, PhotoRescanner (manual catch-up scan),
+│                           PendingStripReconciler (drop deleted photos),
+│                           PhotoActionReceiver (notification action buttons)
+├── permissions/            Permissions.kt — runtime permission state snapshot
 ├── theme/                  Material 3 color/typography
-└── ui/                     Compose screens, ViewModels, navigation
+└── ui/                     Compose screens (Home / MapZone / Settings),
+                            ViewModels, PhotoDetailDialog, FaqCard, navigation
 ```
 
 ## Key design choices
@@ -111,7 +120,7 @@ dev.whitphx.nolocationzones
 | `POST_NOTIFICATIONS` | Required on Android 13+ to display the foreground-service notification and the actionable review notification. |
 | `RECEIVE_BOOT_COMPLETED` | Lets `BootReceiver` re-register geofences after reboot. (Geofences live in Play Services and are wiped at boot.) |
 
-Write access to a photo is **not** granted by any of these — it is requested per batch via `MediaStore.createWriteRequest()` when the user taps **Strip all** in the review screen. The system shows its own dialog listing the affected files; if the user declines, no bytes are touched.
+Write access to a photo is **not** granted by any of these — it is requested per batch via `MediaStore.createWriteRequest()` when the user triggers a strip (per-row action, selection-mode bulk, or the per-photo notification's **Strip GPS** action). The system shows its own dialog listing the affected files; if the user declines, no bytes are touched.
 
 ## Building and installing on your own phone
 
@@ -139,9 +148,9 @@ First-run setup, in this order:
 2. Tap **Grant** on *Foreground location & photo access* — answer the system dialog with *While using the app*.
 3. Tap **Grant** on *Background location*. On Android 11+ this opens Settings; choose *Allow all the time*.
 4. Tap **Grant** on *Notifications* (Android 13+).
-5. Tap **+** to add your first zone. A map opens centered on your current location; tap anywhere else on the map to drop the pin elsewhere, drag the pin to fine-tune, set a name, adjust the radius (100 m – 5 km), and tap **Save**. To edit or delete an existing zone later, tap its row in the list to reopen the same screen.
-6. Take a test photo with the stock camera. Within a few seconds a "Photos waiting for review" notification appears.
-7. Tap the notification. The review screen lists the photo. Tap **Strip all**, and accept the system's *"Allow this app to modify these photos?"* dialog.
+5. Tap **+** in the zones bottom sheet to add your first zone. A map opens centered on your current location; tap anywhere on the map to place the pin, set a name, adjust the radius (100 m – 5 km), and tap **Save**. To edit or delete an existing zone later, tap its row in the bottom sheet to reopen the same screen.
+6. Take a test photo with the stock camera. Within a few seconds a per-photo notification appears with **Strip GPS** and **Show location** action buttons.
+7. Tap the notification body to open the app's photo queue, or tap **Strip GPS** directly on the notification. Either way the system shows its *"Allow this app to modify these photos?"* consent dialog before any byte is written. In the queue you can also long-press to select multiple photos and tap **Strip GPS selected** in the header.
 8. Verify the result with any EXIF viewer — GPS tags should be absent.
 9. Walk outside the zone (or shrink the radius and step away). The **Inside** badge flips to **Outside** and monitoring stops.
 
@@ -174,8 +183,8 @@ A user who wants the most thorough scrub should run a separate desktop tool (e.g
 
 ## Known limitations and edge cases
 
-- **Cloud-backup race.** Google Photos and similar services upload as soon as a photo lands. If they finish before you tap *Strip all* in the review screen, the GPS-tagged original lands in the cloud first. The new design makes this *worse* than an automatic strip would: there is now an unbounded delay between capture and strip (the user might never open the review). **Mitigation:** disable photo backup in the cloud app's settings for `DCIM/Camera`, or accept that the cloud version is leaky. This is the explicit price of the consent-based design — the app cannot rewrite without your permission, so a backup app that doesn't wait for your permission will win the race.
-- **Two-stage camera writes.** Some camera apps write JPEG bytes first and EXIF a moment later. The detection ContentObserver may fire on the partial file; we re-query MediaStore and only act on rows it has finished indexing, so this is usually safe — but if a row is enqueued during the partial-write window the strip itself can fail. Failed strips remain in the queue for retry on the next *Strip all*.
+- **Cloud-backup race.** Google Photos and similar services upload as soon as a photo lands. If they finish before you trigger a strip, the GPS-tagged original lands in the cloud first. The new design makes this *worse* than an automatic strip would: there is now an unbounded delay between capture and strip (the user might never act on the queue). **Mitigation:** disable photo backup in the cloud app's settings for `DCIM/Camera`, or accept that the cloud version is leaky. This is the explicit price of the consent-based design — the app cannot rewrite without your permission, so a backup app that doesn't wait for your permission will win the race.
+- **Two-stage camera writes.** Some camera apps write JPEG bytes first and EXIF a moment later. The detection ContentObserver may fire on the partial file; we re-query MediaStore and only act on rows it has finished indexing, so this is usually safe — but if a row is enqueued during the partial-write window the strip itself can fail. Failed strips remain in the queue for retry on the next attempt.
 - **Geofence accuracy floor.** GPS noise produces spurious enter/exit events at small radii. The UI enforces a 100 m minimum (Google's published guidance). Even at 100 m, expect a handful of false transitions per day if you live very close to a zone boundary.
 - **HEIF.** AndroidX `ExifInterface` 1.4 supports HEIF read+write. Some devices write `.heic` containers that wrap a sequence of HEVC frames; ExifInterface handles them, but if you see scrub failures in the logs for `image/heif`, that is the suspect.
 - **Reboot.** Geofences are stored inside Play Services and are wiped at reboot. `BootReceiver` re-registers them on `BOOT_COMPLETED`. There is a brief window during boot before our receiver runs; a photo taken in that window from inside a zone will not be detected.
@@ -190,4 +199,4 @@ A user who wants the most thorough scrub should run a separate desktop tool (e.g
 - **Per-zone schedules.** "Strip GPS only on weekends at the office" — would require a small scheduler layered on top of the active-zone state.
 - **Video files.** Modifying GPS metadata in `.mp4` requires walking the `udta`/`gps0` boxes; ExifInterface only handles still images.
 - **Auto-strip option for a Play-Store version.** With `MediaStore.createWriteRequest()` you can pre-collect a session's worth of photos and submit one consent dialog at the moment of a UI-foreground event (e.g. when the user opens the camera app). The current MVP keeps the model deliberately simple: detect, queue, prompt-on-review.
-- **Bulk skip with tombstone.** If the user taps *Skip all*, photos are forgotten but could re-appear if MediaStore rescans. A persistent "skipped" set would prevent that.
+- **Bulk skip with tombstone.** Skipped photos are forgotten but could re-appear if MediaStore rescans (e.g. via the manual *Rescan* in Settings). A persistent "skipped" set would prevent that.
