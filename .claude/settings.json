@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && ./gradlew :app:assembleDebug && android run --apks=app/build/outputs/apk/debug/app-debug.apk",
+            "timeout": 600
+          }
+        ]
+      }
+    ]
+  }
+}
