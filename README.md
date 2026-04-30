@@ -1,4 +1,7 @@
-# Photo No-Location Zones
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="branding/project-logo-dark.svg">
+  <img src="branding/project-logo.svg" alt="Photo No-Location Zones" width="480">
+</picture>
 
 An Android app that strips GPS metadata from photos taken inside user-defined geographic zones (e.g. home, workplace), while preserving location data on photos taken anywhere else so they remain useful as travel logs.
 
