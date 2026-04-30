@@ -52,8 +52,6 @@ import dev.whitphx.nolocationzones.domain.Zone
 import dev.whitphx.nolocationzones.photo.ExifGpsReader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.text.DateFormat
-import java.util.Date
 
 /**
  * Full-screen dialog that splits the viewport into two equal panes: the photo on top and the
@@ -260,8 +258,7 @@ private fun MapBody(lat: Double, lon: Double, zones: List<Zone>, modifier: Modif
 private fun buildSubtitle(item: PendingStrip): String? {
     val parts = mutableListOf<String>()
     if (item.dateTakenMs > 0L) {
-        parts += "Taken " + DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
-            .format(Date(item.dateTakenMs))
+        parts += formatTimestamp(item.dateTakenMs)
     }
     item.zoneName?.let { parts += it }
     return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")

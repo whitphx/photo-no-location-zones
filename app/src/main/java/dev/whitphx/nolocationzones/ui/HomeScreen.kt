@@ -76,8 +76,6 @@ import dev.whitphx.nolocationzones.domain.PendingStrip
 import dev.whitphx.nolocationzones.domain.Zone
 import dev.whitphx.nolocationzones.photo.PhotoRescanner
 import kotlinx.coroutines.launch
-import java.text.DateFormat
-import java.util.Date
 
 /**
  * Single primary screen the user sees on launch:
@@ -517,11 +515,10 @@ private fun PendingRow(
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
-                    val fmt = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
                     val zone = item.zoneName?.let { " · $it" } ?: ""
                     val timestamp = if (item.dateTakenMs > 0L) item.dateTakenMs else item.detectedAt
                     Text(
-                        text = "${fmt.format(Date(timestamp))}$zone",
+                        text = "${formatTimestamp(timestamp)}$zone",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
