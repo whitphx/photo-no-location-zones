@@ -344,7 +344,6 @@ fun HomeScreen(
                                 PendingRow(
                                     item = item,
                                     onClick = { preview = item },
-                                    onShowLocation = { preview = item },
                                     onStrip = { reviewViewModel.requestStripOne(item.imageId) },
                                     onSkip = { reviewViewModel.skipOne(item.imageId) },
                                 )
@@ -505,7 +504,6 @@ private fun RescanProgressRow() {
 private fun PendingRow(
     item: PendingStrip,
     onClick: () -> Unit,
-    onShowLocation: () -> Unit,
     onStrip: () -> Unit,
     onSkip: () -> Unit,
 ) {
@@ -522,19 +520,10 @@ private fun PendingRow(
                     )
                     val fmt = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
                     val zone = item.zoneName?.let { " · $it" } ?: ""
-                    val primary = if (item.dateTakenMs > 0L) {
-                        "Taken ${fmt.format(Date(item.dateTakenMs))}$zone"
-                    } else {
-                        "Detected ${fmt.format(Date(item.detectedAt))}$zone"
-                    }
+                    val timestamp = if (item.dateTakenMs > 0L) item.dateTakenMs else item.detectedAt
                     Text(
-                        primary,
+                        text = "${fmt.format(Date(timestamp))}$zone",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        "Tap to preview",
-                        style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -544,8 +533,6 @@ private fun PendingRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
             ) {
-                TextButton(onClick = onShowLocation) { Text("Location") }
-                Spacer(Modifier.width(4.dp))
                 TextButton(onClick = onSkip) { Text("Skip") }
                 Spacer(Modifier.width(4.dp))
                 TextButton(onClick = onStrip) { Text("Strip GPS") }
