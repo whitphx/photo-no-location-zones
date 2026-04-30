@@ -303,13 +303,12 @@ fun HomeScreen(
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        // The bottom-sheet's peek covers the bottom [SHEET_PEEK_HEIGHT] of the screen, so the
-        // main content gets explicit bottom padding to keep the action row above the peek.
+        // [padding] already includes the sheet peek as bottom inset, so the main content fills
+        // exactly the area above the peek without any explicit bottom adjustment.
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .padding(bottom = SHEET_PEEK_HEIGHT),
+                .padding(padding),
         ) {
             Box(
                 modifier = Modifier
