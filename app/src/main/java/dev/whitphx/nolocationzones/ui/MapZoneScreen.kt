@@ -287,7 +287,7 @@ private fun BottomPanel(
             RadiusControl(radius = radius, onRadiusChange = onRadiusChange)
             Spacer(Modifier.height(4.dp))
             Text(
-                "Tap the map to move the center. Drag the pin to fine-tune.",
+                "Tap the map to set the pin location.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
