@@ -32,12 +32,10 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Circle
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -119,7 +117,6 @@ fun HomeScreen(
 
     var pendingTargetIds by remember { mutableStateOf<List<Long>>(emptyList()) }
     var preview: PendingStrip? by remember { mutableStateOf(null) }
-    var pendingDelete: Zone? by remember { mutableStateOf(null) }
     var sortMenuOpen by remember { mutableStateOf(false) }
     var rescanMenuOpen by remember { mutableStateOf(false) }
     var selectedIds: Set<Long> by remember { mutableStateOf(emptySet()) }
@@ -220,7 +217,6 @@ fun HomeScreen(
                 zones = zoneItems,
                 onAddZone = onAddZone,
                 onEditZone = onEditZone,
-                onDeleteZone = { pendingDelete = it },
             )
         },
         topBar = {
@@ -399,22 +395,6 @@ fun HomeScreen(
         }
     }
 
-    pendingDelete?.let { zone ->
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text("Delete zone?") },
-            text = { Text("\"${zone.name}\" will be removed and the geofence unregistered.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    mainViewModel.deleteZone(zone)
-                    pendingDelete = null
-                }) { Text("Delete") }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("Cancel") }
-            },
-        )
-    }
 
     preview?.let { item ->
         PhotoDetailDialog(
@@ -664,7 +644,6 @@ private fun ZoneSheet(
     zones: List<ZoneListItem>,
     onAddZone: () -> Unit,
     onEditZone: (Long) -> Unit,
-    onDeleteZone: (Zone) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -702,7 +681,6 @@ private fun ZoneSheet(
                     ZoneFooterRow(
                         item = item,
                         onClick = { onEditZone(item.zone.id) },
-                        onDelete = { onDeleteZone(item.zone) },
                     )
                 }
                 item { Spacer(Modifier.height(24.dp)) }
@@ -780,7 +758,7 @@ private fun StatusIndicator(permissionsAllGranted: Boolean, activeZoneCount: Int
 }
 
 @Composable
-private fun ZoneFooterRow(item: ZoneListItem, onClick: () -> Unit, onDelete: () -> Unit) {
+private fun ZoneFooterRow(item: ZoneListItem, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -795,22 +773,12 @@ private fun ZoneFooterRow(item: ZoneListItem, onClick: () -> Unit, onDelete: () 
             modifier = Modifier.size(20.dp),
         )
         Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(item.zone.name, style = MaterialTheme.typography.bodyMedium)
-            Text(
-                "${item.zone.radiusMeters.toInt()} m",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        Text(
+            item.zone.name,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f),
+        )
         ActiveBadge(active = item.isActive)
-        IconButton(onClick = onDelete) {
-            Icon(
-                Icons.Filled.Delete,
-                contentDescription = "Delete zone",
-                modifier = Modifier.size(20.dp),
-            )
-        }
     }
 }
 
