@@ -948,6 +948,14 @@ private fun FilterSheet(
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    val animateClose: () -> Unit = {
+        // Animate the sheet out via hide() before signalling dismiss; setting the parent state
+        // to false directly unmounts the composable mid-flight and skips the slide-down animation.
+        scope.launch { sheetState.hide() }.invokeOnCompletion {
+            if (!sheetState.isVisible) onDismiss()
+        }
+    }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -974,6 +982,9 @@ private fun FilterSheet(
                 )
                 if (filter.isActive) {
                     TextButton(onClick = { onFilterChange(ReviewFilter()) }) { Text("Reset") }
+                }
+                IconButton(onClick = animateClose) {
+                    Icon(Icons.Filled.Close, contentDescription = "Close filters")
                 }
             }
             Spacer(Modifier.height(12.dp))
