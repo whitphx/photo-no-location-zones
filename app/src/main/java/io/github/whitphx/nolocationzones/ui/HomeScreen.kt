@@ -26,12 +26,19 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Circle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -43,21 +50,29 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.TriStateCheckbox
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DateRangePicker
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.InputChip
+import androidx.compose.material3.InputChipDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.material3.rememberBottomSheetScaffoldState
+import androidx.compose.material3.rememberDateRangePickerState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -112,6 +127,7 @@ fun HomeScreen(
     val event by reviewViewModel.events.collectAsState()
     val rescanning by reviewViewModel.rescanning.collectAsStateWithLifecycle()
     val sortBy by reviewViewModel.sortBy.collectAsStateWithLifecycle()
+    val filter by reviewViewModel.filter.collectAsStateWithLifecycle()
     val mapZones by reviewViewModel.zones.collectAsStateWithLifecycle()
     val permissions by rememberPermissionState()
     val snackbar = remember { SnackbarHostState() }
@@ -120,6 +136,8 @@ fun HomeScreen(
     var preview: PendingStrip? by remember { mutableStateOf(null) }
     var sortMenuOpen by remember { mutableStateOf(false) }
     var rescanMenuOpen by remember { mutableStateOf(false) }
+    var filterSheetOpen by remember { mutableStateOf(false) }
+    var dateRangeOpen by remember { mutableStateOf(false) }
     var selectedIds: Set<Long> by remember { mutableStateOf(emptySet()) }
 
     // Prune selection when items disappear (strip success / skip / external delete).
@@ -246,6 +264,20 @@ fun HomeScreen(
                     }
                 },
                 actions = {
+                    if (items.isNotEmpty() || filter.isActive) {
+                        IconButton(onClick = { filterSheetOpen = true }) {
+                            Icon(
+                                Icons.Filled.FilterList,
+                                contentDescription = if (filter.isActive) "Filters (active)" else "Filter photos",
+                                // Tint when active so the user sees at a glance that filters are applied.
+                                tint = if (filter.isActive) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                    }
                     if (items.isNotEmpty()) {
                         IconButton(onClick = { sortMenuOpen = true }) {
                             Icon(
@@ -318,6 +350,12 @@ fun HomeScreen(
                 .fillMaxSize()
                 .padding(padding),
         ) {
+            if (filter.isActive) {
+                ActiveFilterChipsRow(
+                    filter = filter,
+                    onFilterChange = reviewViewModel::setFilter,
+                )
+            }
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -334,6 +372,9 @@ fun HomeScreen(
                             PermissionsCard(onAllGranted = { mainViewModel.resyncGeofences() })
                         }
                     }
+                    items.isEmpty() && filter.isActive -> EmptyFilteredHint(
+                        onClearFilters = { reviewViewModel.setFilter(ReviewFilter()) },
+                    )
                     items.isEmpty() -> EmptyPhotoListHint(
                         rescanning = rescanning,
                         onRescan = { reviewViewModel.rescan(PhotoRescanner.DEFAULT_DAYS_BACK) },
@@ -410,6 +451,30 @@ fun HomeScreen(
                 reviewViewModel.skipOne(item.imageId)
                 preview = null
             },
+        )
+    }
+
+    if (filterSheetOpen) {
+        FilterSheet(
+            filter = filter,
+            availableZones = zoneItems.map { it.zone.name }.distinct(),
+            onFilterChange = reviewViewModel::setFilter,
+            onRequestDateRange = {
+                dateRangeOpen = true
+                filterSheetOpen = false
+            },
+            onDismiss = { filterSheetOpen = false },
+        )
+    }
+
+    if (dateRangeOpen) {
+        DateRangePickerDialog(
+            initial = filter.date as? DateFilter.Range,
+            onConfirm = { fromMs, toMs ->
+                reviewViewModel.setFilter(filter.copy(date = DateFilter.Range(fromMs, toMs)))
+                dateRangeOpen = false
+            },
+            onDismiss = { dateRangeOpen = false },
         )
     }
 }
@@ -815,4 +880,258 @@ private fun ActiveBadge(active: Boolean) {
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
         )
     }
+}
+
+/* ─────────────────────────── Filter UI ─────────────────────────── */
+
+/**
+ * Horizontal row of removable [InputChip]s — one per active filter criterion. Tapping the X on
+ * a chip clears that single criterion. Renders nothing when no filter is active; the caller
+ * gates this with `filter.isActive`.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ActiveFilterChipsRow(
+    filter: ReviewFilter,
+    onFilterChange: (ReviewFilter) -> Unit,
+) {
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (filter.mediaType != MediaTypeFilter.All) {
+            item { FilterChipPill(filter.mediaType.label) { onFilterChange(filter.copy(mediaType = MediaTypeFilter.All)) } }
+        }
+        when (val d = filter.date) {
+            DateFilter.All -> Unit
+            is DateFilter.LastDays -> item {
+                FilterChipPill(d.label) { onFilterChange(filter.copy(date = DateFilter.All)) }
+            }
+            is DateFilter.Range -> item {
+                FilterChipPill(formatDateRange(d.fromMs, d.toMs)) { onFilterChange(filter.copy(date = DateFilter.All)) }
+            }
+        }
+        items(filter.zones.toList()) { zone ->
+            FilterChipPill("Zone: $zone") { onFilterChange(filter.copy(zones = filter.zones - zone)) }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FilterChipPill(label: String, onRemove: () -> Unit) {
+    InputChip(
+        selected = true,
+        onClick = onRemove,
+        label = { Text(label) },
+        trailingIcon = {
+            Icon(
+                Icons.Filled.Close,
+                contentDescription = "Remove $label filter",
+                modifier = Modifier.size(InputChipDefaults.IconSize),
+            )
+        },
+    )
+}
+
+/**
+ * Bottom sheet that edits the queue filter. Updates the filter live as the user toggles —
+ * there is no "Apply" button; "Reset" clears every criterion at once.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FilterSheet(
+    filter: ReviewFilter,
+    availableZones: List<String>,
+    onFilterChange: (ReviewFilter) -> Unit,
+    onRequestDateRange: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Filters",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                if (filter.isActive) {
+                    TextButton(onClick = { onFilterChange(ReviewFilter()) }) { Text("Reset") }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+
+            FilterSection("Media type") {
+                MediaTypeFilter.entries.forEach { option ->
+                    RadioOption(
+                        label = option.label,
+                        selected = filter.mediaType == option,
+                        onClick = { onFilterChange(filter.copy(mediaType = option)) },
+                    )
+                }
+            }
+
+            FilterSection("Date") {
+                RadioOption(
+                    label = "All time",
+                    selected = filter.date == DateFilter.All,
+                    onClick = { onFilterChange(filter.copy(date = DateFilter.All)) },
+                )
+                DateFilter.PRESETS.forEach { preset ->
+                    RadioOption(
+                        label = preset.label,
+                        selected = filter.date == preset,
+                        onClick = { onFilterChange(filter.copy(date = preset)) },
+                    )
+                }
+                val range = filter.date as? DateFilter.Range
+                RadioOption(
+                    label = if (range != null) {
+                        "Custom: ${formatDateRange(range.fromMs, range.toMs)}"
+                    } else "Custom range…",
+                    selected = range != null,
+                    onClick = onRequestDateRange,
+                )
+            }
+
+            if (availableZones.isNotEmpty()) {
+                FilterSection("Zones") {
+                    availableZones.forEach { zone ->
+                        CheckboxOption(
+                            label = zone,
+                            checked = zone in filter.zones,
+                            onCheckedChange = { checked ->
+                                val next = if (checked) filter.zones + zone else filter.zones - zone
+                                onFilterChange(filter.copy(zones = next))
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FilterSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Text(
+        title,
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
+    )
+    Column(content = content)
+    Spacer(Modifier.height(8.dp))
+}
+
+@Composable
+private fun RadioOption(label: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = onClick)
+        Spacer(Modifier.width(8.dp))
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+@Composable
+private fun CheckboxOption(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(checked = checked, onCheckedChange = onCheckedChange)
+        Spacer(Modifier.width(8.dp))
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+/**
+ * Wraps Material 3's [DateRangePicker] in the standard [DatePickerDialog] container so OK / Cancel
+ * actions and dismiss-on-scrim behaviour come for free. Returns the inclusive range in millis;
+ * we day-align on confirm so the filter matches whole days regardless of the picker's UTC anchor.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DateRangePickerDialog(
+    initial: DateFilter.Range?,
+    onConfirm: (Long, Long) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val state = rememberDateRangePickerState(
+        initialSelectedStartDateMillis = initial?.fromMs,
+        initialSelectedEndDateMillis = initial?.toMs,
+    )
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                enabled = state.selectedStartDateMillis != null && state.selectedEndDateMillis != null,
+                onClick = {
+                    val s = state.selectedStartDateMillis ?: return@TextButton
+                    val e = state.selectedEndDateMillis ?: return@TextButton
+                    // The picker emits midnight-UTC for the *day* the user picked. Snap the upper
+                    // bound to end-of-day so a same-day pick still matches items captured later
+                    // that day.
+                    val endInclusive = e + 24L * 60L * 60L * 1000L - 1L
+                    onConfirm(s, endInclusive)
+                },
+            ) { Text("OK") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    ) {
+        DateRangePicker(
+            state = state,
+            modifier = Modifier.heightIn(max = 560.dp),
+        )
+    }
+}
+
+@Composable
+private fun EmptyFilteredHint(onClearFilters: () -> Unit) {
+    Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                "No matches",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "No items match the active filters. Clear them to see the full queue.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+            Spacer(Modifier.height(16.dp))
+            OutlinedButton(onClick = onClearFilters) { Text("Clear filters") }
+        }
+    }
+}
+
+private fun formatDateRange(fromMs: Long, toMs: Long): String {
+    val fmt = java.text.DateFormat.getDateInstance(java.text.DateFormat.SHORT)
+    return "${fmt.format(java.util.Date(fromMs))} – ${fmt.format(java.util.Date(toMs))}"
 }

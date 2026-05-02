@@ -27,8 +27,77 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+enum class MediaTypeFilter(val label: String) {
+    All("All media"),
+    PhotosOnly("Photos only"),
+    VideosOnly("Videos only"),
+    ;
+
+    fun matches(item: PendingStrip): Boolean = when (this) {
+        All -> true
+        PhotosOnly -> !item.isVideo
+        VideosOnly -> item.isVideo
+    }
+}
+
+/**
+ * Time-window filter for the queue. The matching column is `dateTakenMs` if MediaStore knew the
+ * capture time (the common case for camera-taken media); otherwise it falls back to `detectedAt`,
+ * which is the moment we first saw the file in MediaStore. Falling back keeps screenshots and
+ * other zero-`dateTakenMs` rows reachable instead of always failing the filter.
+ */
+sealed interface DateFilter {
+    data object All : DateFilter
+
+    /** Last [days] days, anchored to the time the filter is evaluated. Includes today. */
+    data class LastDays(val days: Int, val label: String) : DateFilter
+
+    /** Inclusive `[fromMs, toMs]` range, day-aligned at the call site. */
+    data class Range(val fromMs: Long, val toMs: Long) : DateFilter
+
+    fun matches(item: PendingStrip, nowMs: Long): Boolean {
+        val ts = if (item.dateTakenMs > 0L) item.dateTakenMs else item.detectedAt
+        return when (this) {
+            All -> true
+            is LastDays -> ts >= nowMs - TimeUnit.DAYS.toMillis(days.toLong())
+            is Range -> ts in fromMs..toMs
+        }
+    }
+
+    companion object {
+        val PRESETS: List<LastDays> = listOf(
+            LastDays(days = 1, label = "Today"),
+            LastDays(days = 7, label = "Last 7 days"),
+            LastDays(days = 30, label = "Last 30 days"),
+            LastDays(days = 90, label = "Last 90 days"),
+        )
+    }
+}
+
+data class ReviewFilter(
+    val mediaType: MediaTypeFilter = MediaTypeFilter.All,
+    val date: DateFilter = DateFilter.All,
+    val zones: Set<String> = emptySet(),
+) {
+    val isActive: Boolean
+        get() = mediaType != MediaTypeFilter.All ||
+            date != DateFilter.All ||
+            zones.isNotEmpty()
+
+    fun apply(items: List<PendingStrip>): List<PendingStrip> {
+        if (!isActive) return items
+        val now = System.currentTimeMillis()
+        return items.filter { item ->
+            mediaType.matches(item) &&
+                date.matches(item, now) &&
+                (zones.isEmpty() || item.zoneName in zones)
+        }
+    }
+}
 
 enum class SortBy(val label: String) {
     DateTakenDesc("Date taken — newest first"),
@@ -90,8 +159,17 @@ class ReviewViewModel(application: Application) : AndroidViewModel(application) 
         _sortBy.value = value
     }
 
+    private val _filter = MutableStateFlow(ReviewFilter())
+    val filter: StateFlow<ReviewFilter> = _filter.asStateFlow()
+
+    fun setFilter(value: ReviewFilter) {
+        _filter.value = value
+    }
+
     val pending: StateFlow<List<PendingStrip>> =
-        combine(pendingRepo.all, _sortBy) { items, sort -> sort.apply(items) }
+        combine(pendingRepo.all, _sortBy, _filter) { items, sort, filter ->
+            sort.apply(filter.apply(items))
+        }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val zones: StateFlow<List<Zone>> =
