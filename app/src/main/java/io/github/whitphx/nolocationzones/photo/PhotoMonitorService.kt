@@ -40,14 +40,19 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * While the user is inside any zone, watches MediaStore for new photos. For each new photo that
- * still has GPS metadata, inserts a row into the pending-strip queue (Room) and posts a
- * per-photo notification with a thumbnail preview and three quick actions: Strip GPS, Show
- * location, Skip.
+ * While the user is inside any zone, watches MediaStore for new photos and videos. For each new
+ * media row that still carries GPS metadata, inserts a row into the pending-strip queue (Room)
+ * and posts a per-item notification with a thumbnail preview and three quick actions: Strip GPS,
+ * Show location, Skip.
  *
- * The service does NOT modify photos — modification requires user consent via
+ * The service does NOT modify media — modification requires user consent via
  * [MediaStore.createWriteRequest], which can only be invoked from an Activity. The service's only
  * job is detection + queueing + notifying.
+ *
+ * Images and videos live in separate MediaStore collections, so the service registers two
+ * ContentObservers and runs the scan once per collection. The pending-strip table stores the
+ * item's MIME type so the strip pipeline can dispatch to either [ExifGpsStripper] (images) or
+ * [Mp4GpsStripper] (videos) without re-querying.
  *
  * Service type: `location` — the work is gated by location and bounded to a defined geographic
  * area, which matches the type's spirit and is the only background-startable type that aligns
@@ -84,6 +89,11 @@ class PhotoMonitorService : LifecycleService() {
 
         contentResolver.registerContentObserver(
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            /* notifyForDescendants */ true,
+            observer,
+        )
+        contentResolver.registerContentObserver(
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
             /* notifyForDescendants */ true,
             observer,
         )
@@ -135,46 +145,54 @@ class PhotoMonitorService : LifecycleService() {
     }
 
     private suspend fun scanAndQueue() = withContext(Dispatchers.IO) {
-        val cutoff = stateStore.getLastSeenImageId()
         val activeId = stateStore.firstActiveZoneId()
         val zoneName = activeId?.let { runCatching { zoneRepo.get(it)?.name }.getOrNull() }
+        scanCollection(MediaCollection.Images, zoneName)
+        scanCollection(MediaCollection.Videos, zoneName)
+    }
+
+    private suspend fun scanCollection(collection: MediaCollection, zoneName: String?) {
+        val cutoff = when (collection) {
+            MediaCollection.Images -> stateStore.getLastSeenImageId()
+            MediaCollection.Videos -> stateStore.getLastSeenVideoId()
+        }
 
         val projection = arrayOf(
-            MediaStore.Images.Media._ID,
-            MediaStore.Images.Media.MIME_TYPE,
-            MediaStore.Images.Media.DISPLAY_NAME,
-            MediaStore.Images.Media.DATE_TAKEN,
+            MediaStore.MediaColumns._ID,
+            MediaStore.MediaColumns.MIME_TYPE,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.DATE_TAKEN,
         )
-        val selection = "${MediaStore.Images.Media._ID} > ? AND " +
-            "(${MediaStore.Images.Media.MIME_TYPE} = 'image/jpeg' OR " +
-            "${MediaStore.Images.Media.MIME_TYPE} = 'image/heif' OR " +
-            "${MediaStore.Images.Media.MIME_TYPE} = 'image/heic')"
-        val args = arrayOf(cutoff.toString())
-        val sort = "${MediaStore.Images.Media._ID} ASC"
+        val mimeClause = collection.mimeTypes.joinToString(" OR ") {
+            "${MediaStore.MediaColumns.MIME_TYPE} = ?"
+        }
+        val selection = "${MediaStore.MediaColumns._ID} > ? AND ($mimeClause)"
+        val args = arrayOf(cutoff.toString()) + collection.mimeTypes.toTypedArray()
+        val sort = "${MediaStore.MediaColumns._ID} ASC"
 
         val cursor = runCatching {
-            contentResolver.query(
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                projection,
-                selection,
-                args,
-                sort,
-            )
-        }.getOrNull() ?: return@withContext
+            contentResolver.query(collection.uri, projection, selection, args, sort)
+        }.getOrNull() ?: return
 
         val now = System.currentTimeMillis()
         var maxSeen = cutoff
         val newlyQueued = mutableListOf<PendingStrip>()
         cursor.use { c ->
-            val idCol = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-            val nameCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
-            val takenCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
+            val idCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+            val nameCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+            val takenCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_TAKEN)
+            val mimeCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
             while (c.moveToNext()) {
                 val id = c.getLong(idCol)
                 if (id > maxSeen) maxSeen = id
-                val uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
-                if (!ExifGpsStripper.hasGpsTags(contentResolver, uri)) {
-                    Log.d(TAG, "Image $id has no GPS — skipping queue")
+                val mime = c.getString(mimeCol) ?: continue
+                val uri = ContentUris.withAppendedId(collection.uri, id)
+                val hasGps = when (collection) {
+                    MediaCollection.Images -> ExifGpsStripper.hasGpsTags(contentResolver, uri)
+                    MediaCollection.Videos -> Mp4GpsStripper.hasLocationAtoms(contentResolver, uri)
+                }
+                if (!hasGps) {
+                    Log.d(TAG, "${collection.tag} $id has no GPS — skipping queue")
                     continue
                 }
                 val item = PendingStrip(
@@ -184,13 +202,17 @@ class PhotoMonitorService : LifecycleService() {
                     detectedAt = now,
                     zoneName = zoneName,
                     dateTakenMs = if (c.isNull(takenCol)) 0L else c.getLong(takenCol),
+                    mimeType = mime,
                 )
                 pendingRepo.add(item)
                 newlyQueued += item
-                Log.i(TAG, "Queued image $id for user review")
+                Log.i(TAG, "Queued ${collection.tag} $id ($mime) for user review")
             }
         }
-        if (maxSeen > cutoff) stateStore.setLastSeenImageId(maxSeen)
+        if (maxSeen > cutoff) when (collection) {
+            MediaCollection.Images -> stateStore.setLastSeenImageId(maxSeen)
+            MediaCollection.Videos -> stateStore.setLastSeenVideoId(maxSeen)
+        }
 
         for (item in newlyQueued) postPhotoNotification(item)
     }

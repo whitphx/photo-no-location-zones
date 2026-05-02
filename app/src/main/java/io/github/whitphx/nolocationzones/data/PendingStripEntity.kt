@@ -17,4 +17,6 @@ data class PendingStripEntity(
     @ColumnInfo(name = "zone_name") val zoneName: String?,
     /** EXIF DateTimeOriginal in millis (0 if unknown). Set at queue time from MediaStore. */
     @ColumnInfo(name = "date_taken_ms", defaultValue = "0") val dateTakenMs: Long = 0,
+    /** MIME type from MediaStore (e.g. `image/jpeg`, `video/mp4`). Null tolerated for legacy rows. */
+    @ColumnInfo(name = "mime_type") val mimeType: String? = null,
 )

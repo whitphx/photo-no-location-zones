@@ -48,6 +48,7 @@ import androidx.compose.runtime.DisposableEffect
 import io.github.whitphx.nolocationzones.domain.PendingStrip
 import io.github.whitphx.nolocationzones.domain.Zone
 import io.github.whitphx.nolocationzones.photo.ExifGpsReader
+import io.github.whitphx.nolocationzones.photo.Mp4GpsReader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.maplibre.android.camera.CameraPosition as MlCameraPosition
@@ -184,7 +185,11 @@ private fun LocationPane(item: PendingStrip, zones: List<Zone>, modifier: Modifi
 
     LaunchedEffect(item.imageId) {
         coords = withContext(Dispatchers.IO) {
-            ExifGpsReader.readLatLong(context.contentResolver, item.contentUri)
+            if (item.isVideo) {
+                Mp4GpsReader.readLatLong(context.contentResolver, item.contentUri)
+            } else {
+                ExifGpsReader.readLatLong(context.contentResolver, item.contentUri)
+            }
         }
         loaded = true
     }

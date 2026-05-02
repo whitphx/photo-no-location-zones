@@ -1,8 +1,10 @@
 package io.github.whitphx.nolocationzones.photo
 
+import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.Context
 import android.location.Location
+import android.net.Uri
 import android.provider.MediaStore
 import android.util.Log
 import io.github.whitphx.nolocationzones.data.PendingStripRepository
@@ -13,12 +15,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Scans MediaStore photos, reads each photo's own EXIF GPS, and queues for review every photo
- * whose coordinates fall inside any defined zone.
+ * Scans MediaStore photos and videos, reads each item's own embedded GPS (EXIF for images,
+ * QuickTime `moov/udta/©xyz` for videos), and queues for review every item whose coordinates
+ * fall inside any defined zone.
  *
- * This is the recovery path: it lets the user re-find photos they skipped earlier, and pull in
- * past photos that were taken before the app was installed (or while the app process wasn't
- * running and the live ContentObserver missed them).
+ * This is the recovery path: it lets the user re-find media they skipped earlier, and pull in
+ * past media taken before the app was installed (or while the app process wasn't running and the
+ * live ContentObserver missed it).
  */
 class PhotoRescanner(
     private val context: Context,
@@ -44,66 +47,20 @@ class PhotoRescanner(
         }
 
         val resolver = context.contentResolver
+        val now = System.currentTimeMillis()
         val timeFilter = daysBack != Int.MAX_VALUE
         val cutoffSec = if (timeFilter) {
-            (System.currentTimeMillis() - daysBack * 24L * 60L * 60L * 1000L) / 1000L
+            (now - daysBack * 24L * 60L * 60L * 1000L) / 1000L
         } else 0L
-
-        val projection = arrayOf(
-            MediaStore.Images.Media._ID,
-            MediaStore.Images.Media.DISPLAY_NAME,
-            MediaStore.Images.Media.MIME_TYPE,
-            MediaStore.Images.Media.DATE_TAKEN,
-        )
-        val mimeClause = "(${MediaStore.Images.Media.MIME_TYPE} = 'image/jpeg' OR " +
-            "${MediaStore.Images.Media.MIME_TYPE} = 'image/heif' OR " +
-            "${MediaStore.Images.Media.MIME_TYPE} = 'image/heic')"
-        val (selection, args) = if (timeFilter) {
-            "${MediaStore.Images.Media.DATE_ADDED} >= ? AND $mimeClause" to arrayOf(cutoffSec.toString())
-        } else {
-            mimeClause to emptyArray()
-        }
-        val sort = "${MediaStore.Images.Media.DATE_ADDED} DESC"
-
-        val cursor = resolver.query(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            projection,
-            selection,
-            args,
-            sort,
-        ) ?: return@withContext Result(matched = 0, scanned = 0, noGps = 0, zonesAtScan = zones.size, daysBack = daysBack)
 
         var scanned = 0
         var matched = 0
         var noGps = 0
-        val now = System.currentTimeMillis()
-        cursor.use { c ->
-            val idCol = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-            val nameCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
-            val takenCol = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
-            while (c.moveToNext()) {
-                scanned++
-                val id = c.getLong(idCol)
-                val uri = ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
-                val coords = ExifGpsReader.readLatLong(resolver, uri)
-                if (coords == null) {
-                    noGps++
-                    continue
-                }
-                val zone = zoneContaining(coords[0], coords[1], zones) ?: continue
-
-                pendingRepo.add(
-                    PendingStrip(
-                        imageId = id,
-                        contentUri = uri,
-                        displayName = c.getString(nameCol),
-                        detectedAt = now,
-                        zoneName = zone.name,
-                        dateTakenMs = if (c.isNull(takenCol)) 0L else c.getLong(takenCol),
-                    )
-                )
-                matched++
-            }
+        for (collection in MediaCollection.entries) {
+            val (cs, cm, cn) = scanCollection(resolver, collection, zones, cutoffSec, timeFilter, now)
+            scanned += cs
+            matched += cm
+            noGps += cn
         }
         Log.i(
             TAG,
@@ -117,6 +74,80 @@ class PhotoRescanner(
             zonesAtScan = zones.size,
             daysBack = daysBack,
         )
+    }
+
+    /** Returns `(scanned, matched, noGps)` for one MediaStore collection. */
+    private suspend fun scanCollection(
+        resolver: ContentResolver,
+        collection: MediaCollection,
+        zones: List<Zone>,
+        cutoffSec: Long,
+        timeFilter: Boolean,
+        now: Long,
+    ): Triple<Int, Int, Int> {
+        val projection = arrayOf(
+            MediaStore.MediaColumns._ID,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.MIME_TYPE,
+            MediaStore.MediaColumns.DATE_TAKEN,
+        )
+        val mimePlaceholders = collection.mimeTypes.joinToString(" OR ") {
+            "${MediaStore.MediaColumns.MIME_TYPE} = ?"
+        }
+        val (selection, args) = if (timeFilter) {
+            "${MediaStore.MediaColumns.DATE_ADDED} >= ? AND ($mimePlaceholders)" to
+                (arrayOf(cutoffSec.toString()) + collection.mimeTypes.toTypedArray())
+        } else {
+            "($mimePlaceholders)" to collection.mimeTypes.toTypedArray()
+        }
+        val sort = "${MediaStore.MediaColumns.DATE_ADDED} DESC"
+
+        val cursor = resolver.query(collection.uri, projection, selection, args, sort)
+            ?: return Triple(0, 0, 0)
+
+        var scanned = 0
+        var matched = 0
+        var noGps = 0
+        cursor.use { c ->
+            val idCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+            val nameCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+            val takenCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_TAKEN)
+            val mimeCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
+            while (c.moveToNext()) {
+                scanned++
+                val id = c.getLong(idCol)
+                val mime = c.getString(mimeCol)
+                val uri: Uri = ContentUris.withAppendedId(collection.uri, id)
+                val coords = readCoords(resolver, collection, uri)
+                if (coords == null) {
+                    noGps++
+                    continue
+                }
+                val zone = zoneContaining(coords[0], coords[1], zones) ?: continue
+                pendingRepo.add(
+                    PendingStrip(
+                        imageId = id,
+                        contentUri = uri,
+                        displayName = c.getString(nameCol),
+                        detectedAt = now,
+                        zoneName = zone.name,
+                        dateTakenMs = if (c.isNull(takenCol)) 0L else c.getLong(takenCol),
+                        mimeType = mime,
+                    )
+                )
+                matched++
+            }
+        }
+        return Triple(scanned, matched, noGps)
+    }
+
+    private fun readCoords(
+        resolver: ContentResolver,
+        collection: MediaCollection,
+        uri: Uri,
+    ): DoubleArray? = when (collection) {
+        MediaCollection.Images -> ExifGpsReader.readLatLong(resolver, uri)
+        MediaCollection.Videos -> Mp4GpsReader.readLatLong(resolver, uri)
     }
 
     private fun zoneContaining(latitude: Double, longitude: Double, zones: List<Zone>): Zone? {

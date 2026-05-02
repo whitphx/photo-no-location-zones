@@ -12,6 +12,7 @@
          anything to scrub. Writes go through MediaStore.createWriteRequest() per batch, so no
          broad storage permission is required. -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
 
     <!-- Foreground service to monitor MediaStore while inside a zone. -->

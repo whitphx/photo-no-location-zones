@@ -9,9 +9,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Reconciles the pending-strip queue against MediaStore: any queued imageId that no longer
- * resolves to a real entry (the user deleted the photo from their gallery, the file was moved,
+ * Reconciles the pending-strip queue against MediaStore: any queued media id that no longer
+ * resolves to a real entry (the user deleted the file from their gallery, the file was moved,
  * etc.) is dropped from the queue and its notification is dismissed.
+ *
+ * The presence check goes through `MediaStore.Files` — a single query that sees both images and
+ * videos — because the queue can contain either.
  *
  * Without this, the queue accumulates ghost rows that fail to load thumbnails and crash the
  * Strip flow with `openFileDescriptor` errors.
@@ -29,20 +32,21 @@ class PendingStripReconciler(
 
         // SQLite's IN clause is capped at 999 parameters. Pending lists won't realistically
         // exceed that, but chunk anyway so we don't surprise ourselves later.
+        val filesUri = MediaStore.Files.getContentUri("external")
         val existing = HashSet<Long>(ids.size)
         ids.chunked(500).forEach { chunk ->
             val placeholders = chunk.joinToString(",") { "?" }
             val cursor = runCatching {
                 resolver.query(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    arrayOf(MediaStore.Images.Media._ID),
-                    "${MediaStore.Images.Media._ID} IN ($placeholders)",
+                    filesUri,
+                    arrayOf(MediaStore.MediaColumns._ID),
+                    "${MediaStore.MediaColumns._ID} IN ($placeholders)",
                     chunk.map(Long::toString).toTypedArray(),
                     null,
                 )
             }.getOrNull() ?: return@forEach
             cursor.use { c ->
-                val idCol = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                val idCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
                 while (c.moveToNext()) existing += c.getLong(idCol)
             }
         }

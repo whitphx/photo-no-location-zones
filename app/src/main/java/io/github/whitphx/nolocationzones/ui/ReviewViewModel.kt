@@ -16,6 +16,7 @@ import io.github.whitphx.nolocationzones.data.ZoneRepository
 import io.github.whitphx.nolocationzones.domain.PendingStrip
 import io.github.whitphx.nolocationzones.domain.Zone
 import io.github.whitphx.nolocationzones.photo.ExifGpsStripper
+import io.github.whitphx.nolocationzones.photo.Mp4GpsStripper
 import io.github.whitphx.nolocationzones.photo.PendingStripReconciler
 import io.github.whitphx.nolocationzones.photo.PhotoActionReceiver
 import io.github.whitphx.nolocationzones.photo.PhotoRescanner
@@ -157,18 +158,18 @@ class ReviewViewModel(application: Application) : AndroidViewModel(application) 
             val processedIds = mutableListOf<Long>()
             withContext(Dispatchers.IO) {
                 for (item in items) {
-                    when (val r = ExifGpsStripper.strip(resolver, item.contentUri)) {
-                        is ExifGpsStripper.Result.Stripped -> {
+                    when (val outcome = stripOne(resolver, item)) {
+                        StripOutcome.Stripped -> {
                             stripped++
                             processedIds += item.imageId
                         }
-                        ExifGpsStripper.Result.NoChange -> {
+                        StripOutcome.NoChange -> {
                             skipped++
                             processedIds += item.imageId
                         }
-                        is ExifGpsStripper.Result.Failed -> {
+                        is StripOutcome.Failed -> {
                             failed++
-                            Log.w(TAG, "Failed to strip image ${item.imageId}: ${r.cause.message}")
+                            Log.w(TAG, "Failed to strip ${item.imageId}: ${outcome.cause.message}")
                         }
                     }
                 }
@@ -178,6 +179,29 @@ class ReviewViewModel(application: Application) : AndroidViewModel(application) 
                 cancelNotificationsFor(processedIds)
             }
             _events.value = ReviewEvent.StripCompleted(stripped, skipped, failed)
+        }
+    }
+
+    private sealed interface StripOutcome {
+        data object Stripped : StripOutcome
+        data object NoChange : StripOutcome
+        data class Failed(val cause: Throwable) : StripOutcome
+    }
+
+    private fun stripOne(
+        resolver: android.content.ContentResolver,
+        item: PendingStrip,
+    ): StripOutcome = if (item.isVideo) {
+        when (val r = Mp4GpsStripper.strip(resolver, item.contentUri)) {
+            is Mp4GpsStripper.Result.Stripped -> StripOutcome.Stripped
+            Mp4GpsStripper.Result.NoChange -> StripOutcome.NoChange
+            is Mp4GpsStripper.Result.Failed -> StripOutcome.Failed(r.cause)
+        }
+    } else {
+        when (val r = ExifGpsStripper.strip(resolver, item.contentUri)) {
+            is ExifGpsStripper.Result.Stripped -> StripOutcome.Stripped
+            ExifGpsStripper.Result.NoChange -> StripOutcome.NoChange
+            is ExifGpsStripper.Result.Failed -> StripOutcome.Failed(r.cause)
         }
     }
 

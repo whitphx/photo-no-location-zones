@@ -24,7 +24,9 @@ The high-level diagram lives in `README.md` ("Architecture" section). The notes 
 
 ### Detection vs. modification — never collapse the two
 
-The geofence-triggered `PhotoMonitorService` only **observes and queues** newly captured photos. It must never write to a file. Writes are *exclusively* gated by `MediaStore.createWriteRequest()` and the system consent dialog — `ReviewViewModel` raises a `RequestWriteAccess` event, `MainActivity` launches it via `StartIntentSenderForResult`, and only on success does `ExifGpsStripper.strip()` run on the granted URIs. Bypassing this is a privacy regression and breaks the safety story in the README.
+The geofence-triggered `PhotoMonitorService` only **observes and queues** newly captured photos and videos. It must never write to a file. Writes are *exclusively* gated by `MediaStore.createWriteRequest()` and the system consent dialog — `ReviewViewModel` raises a `RequestWriteAccess` event, `MainActivity` launches it via `StartIntentSenderForResult`, and only on success does the strip pipeline run on the granted URIs. Bypassing this is a privacy regression and breaks the safety story in the README.
+
+`ReviewViewModel.onWriteGranted` dispatches per-row by `PendingStrip.mimeType`: images go to `ExifGpsStripper.strip()`, videos go to `Mp4GpsStripper.strip()`. Both are pure mutators — they never call `createWriteRequest` themselves.
 
 ### Foreground service start path is constrained
 
@@ -38,14 +40,21 @@ Geofences live in Play Services state and are wiped on reboot, on app reinstall,
 
 `GeofenceBroadcastReceiver` writes ENTER/EXIT into `ZoneStateStore` (DataStore). UI status indicators, the foreground service start/stop decision, and the badge in `HomeScreen` all read from there. Don't add a parallel piece of state.
 
-### EXIF stripping is GPS-IFD-aware, not a full metadata wipe
+### Stripping is two parallel pipelines, neither is a full metadata wipe
 
-`ExifGpsStripper` clears the 32 GPS-IFD fields plus a curated identifying-tags list (see `README.md` "Privacy gaps"). It does **not** touch:
-- **XMP** — `androidx.exifinterface` preserves the XMP `APP1` segment byte-for-byte. XMP often duplicates location info (`Iptc4xmpExt:LocationCreated`, `photoshop:City`, etc.).
-- **Motion Photo / Live Photo embedded video** — only the still's EXIF is rewritten; the embedded MP4's `udta/©xyz` GPS atom is untouched.
+`ExifGpsStripper` (images) clears the 32 GPS-IFD fields plus a curated identifying-tags list. `Mp4GpsStripper` (videos) re-tags `moov/udta/©xyz` and `moov/udta/loci` atoms to `free` in place — the file's byte layout (and `mdat` chunk offsets in `stco`/`co64`) stay byte-identical, so we never re-mux the container. Both run a post-strip verification pass that re-reads the file and warns if any target survived (`adb logcat -s ExifGpsStripper Mp4GpsStripper`).
+
+What neither pipeline touches:
+- **XMP (in photos)** — `androidx.exifinterface` preserves the XMP `APP1` segment byte-for-byte. XMP often duplicates location info (`Iptc4xmpExt:LocationCreated`, `photoshop:City`, etc.).
+- **Apple `moov/meta/keys` + `meta/ilst` (in videos)** — iPhone-recorded videos use a keys-table indirection to identify the location atom rather than the QuickTime `©xyz` shortcut. Decoding requires walking the keys table; not yet implemented.
+- **Motion Photo / Live Photo embedded video (within a photo container)** — only the still's EXIF is rewritten; the embedded MP4's GPS atoms are left alone (we know how to clear them in standalone videos but haven't wired up the container-aware byte-range path).
 - **IPTC**, **Windows XP\* tags**, **sensor PRNU**.
 
-If you change `ExifGpsStripper`, also update `README.md` "Privacy gaps" — it is the user-facing contract for what the scrubber does and doesn't cover.
+If you change either stripper, also update `README.md` "Privacy gaps" — it is the user-facing contract for what the scrubber does and doesn't cover.
+
+### MediaStore scanning is per-collection
+
+The pending-strip pipeline tracks images and videos in separate MediaStore collections (`MediaStore.Images.Media.EXTERNAL_CONTENT_URI` and `MediaStore.Video.Media.EXTERNAL_CONTENT_URI`). `MediaCollection` (in `photo/`) holds the per-collection URIs and MIME-type allowlists; `PhotoMonitorService` registers a ContentObserver on each, `PhotoRescanner` iterates both, and `PendingStripReconciler` checks presence via the unified `MediaStore.Files` URI (which sees both collections). Adding a new media kind means adding a `MediaCollection` entry plus a per-kind GPS reader/stripper — don't try to overload the image path.
 
 ### Manual DI through `App.container`
 

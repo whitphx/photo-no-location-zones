@@ -60,18 +60,19 @@ fun PermissionsCard(onAllGranted: () -> Unit) {
             Spacer(Modifier.height(12.dp))
 
             PermissionRow(
-                label = "Foreground location & photo access",
-                hint = "Reads your current location when you create a zone, sees new photos as they appear, and lets us check existing GPS metadata so we know which photos to queue.",
-                granted = state.fineLocation && state.readImages && state.mediaLocation,
+                label = "Foreground location & media access",
+                hint = "Reads your current location when you create a zone, sees new photos and videos as they appear, and lets us check existing GPS metadata so we know which media to queue.",
+                granted = state.fineLocation && state.readImages && state.readVideos && state.mediaLocation,
                 onClick = {
                     val perms = mutableListOf(
                         Manifest.permission.ACCESS_FINE_LOCATION,
                         Manifest.permission.ACCESS_MEDIA_LOCATION,
                     )
-                    perms += if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        Manifest.permission.READ_MEDIA_IMAGES
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        perms += Manifest.permission.READ_MEDIA_IMAGES
+                        perms += Manifest.permission.READ_MEDIA_VIDEO
                     } else {
-                        Manifest.permission.READ_EXTERNAL_STORAGE
+                        perms += Manifest.permission.READ_EXTERNAL_STORAGE
                     }
                     foregroundLauncher.launch(perms.toTypedArray())
                 },

@@ -13,9 +13,16 @@ import kotlinx.coroutines.flow.map
 private val Context.dataStore by preferencesDataStore(name = "zone_state")
 
 /**
- * Tracks two things across process restarts:
+ * Tracks state that must survive process restarts:
  *  - which zones the user is currently inside (set by geofence transitions)
- *  - the highest MediaStore image id we have already inspected (so we know what's "new")
+ *  - the highest MediaStore image id we have already inspected
+ *  - the highest MediaStore video id we have already inspected
+ *
+ * Image and video cutoffs are kept separately because the two MediaStore collections are queried
+ * with their own cursors — `MediaStore.Images.Media.EXTERNAL_CONTENT_URI` and
+ * `MediaStore.Video.Media.EXTERNAL_CONTENT_URI`. A row's `_ID` is globally unique across both
+ * collections, but tracking per-collection cutoffs avoids any "scan everything once on first
+ * launch" behaviour when the unified video path was added.
  */
 class ZoneStateStore(private val context: Context) {
     private val prefs get() = context.dataStore
@@ -49,9 +56,8 @@ class ZoneStateStore(private val context: Context) {
         prefs.edit { it.remove(ACTIVE_ZONE_IDS) }
     }
 
-    val lastSeenImageId: Flow<Long> = prefs.data.map { it[LAST_SEEN_IMAGE_ID] ?: 0L }
-
-    suspend fun getLastSeenImageId(): Long = lastSeenImageId.first()
+    suspend fun getLastSeenImageId(): Long =
+        prefs.data.map { it[LAST_SEEN_IMAGE_ID] ?: 0L }.first()
 
     suspend fun setLastSeenImageId(id: Long) {
         prefs.edit { p ->
@@ -60,8 +66,19 @@ class ZoneStateStore(private val context: Context) {
         }
     }
 
+    suspend fun getLastSeenVideoId(): Long =
+        prefs.data.map { it[LAST_SEEN_VIDEO_ID] ?: 0L }.first()
+
+    suspend fun setLastSeenVideoId(id: Long) {
+        prefs.edit { p ->
+            val current = p[LAST_SEEN_VIDEO_ID] ?: 0L
+            if (id > current) p[LAST_SEEN_VIDEO_ID] = id
+        }
+    }
+
     companion object {
         private val ACTIVE_ZONE_IDS: Preferences.Key<Set<String>> = stringSetPreferencesKey("active_zone_ids")
         private val LAST_SEEN_IMAGE_ID: Preferences.Key<Long> = longPreferencesKey("last_seen_image_id")
+        private val LAST_SEEN_VIDEO_ID: Preferences.Key<Long> = longPreferencesKey("last_seen_video_id")
     }
 }
