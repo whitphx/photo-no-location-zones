@@ -18,8 +18,8 @@ exifInterface = "1.4.1"
 datastore = "1.1.7"
 workManager = "2.10.5"
 material = "1.12.0"
-mapsCompose = "8.3.0"
-playServicesMaps = "20.0.0"
+maplibre = "11.11.0"
+maplibreAnnotation = "3.0.2"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidxCore" }
@@ -53,8 +53,8 @@ androidx-exifinterface = { module = "androidx.exifinterface:exifinterface", vers
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
 androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "workManager" }
 google-material = { module = "com.google.android.material:material", version.ref = "material" }
-play-services-maps = { module = "com.google.android.gms:play-services-maps", version.ref = "playServicesMaps" }
-maps-compose = { module = "com.google.maps.android:maps-compose", version.ref = "mapsCompose" }
+maplibre-android-sdk = { module = "org.maplibre.gl:android-sdk", version.ref = "maplibre" }
+maplibre-annotation = { module = "org.maplibre.gl:android-plugin-annotation-v9", version.ref = "maplibreAnnotation" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "androidGradlePlugin" }

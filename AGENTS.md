@@ -16,11 +16,7 @@ android run --apks=app/build/outputs/apk/debug/app-debug.apk   # deploy to conne
 
 A **`Stop` hook** in `.claude/settings.json` runs `./gradlew :app:assembleDebug && android run --apks=...` automatically after every agent turn. Don't manually build/deploy unless you're debugging that flow itself or the hook is disabled. Hook timeout is 600s; the auto-build may dominate turn time.
 
-The map-based zone editor needs a Google Maps Android SDK key. Set it in `local.properties` (gitignored):
-```
-MAPS_API_KEY=<key>
-```
-Without a key the app builds and runs, but `MapZoneScreen` shows a blank map.
+The map-based zone editor uses **MapLibre Native Android** with **OpenFreeMap** vector tiles. No API key, no signup — the style URL is hardcoded in `MapZoneScreen.kt` and tiles load over plain HTTPS at runtime. If the device is offline the map renders blank but the rest of the editor (radius, name, save) still works.
 
 ## Architecture invariants
 

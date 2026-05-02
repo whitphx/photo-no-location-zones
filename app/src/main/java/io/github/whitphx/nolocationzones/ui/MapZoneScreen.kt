@@ -2,7 +2,9 @@ package io.github.whitphx.nolocationzones.ui
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Context
 import android.content.pm.PackageManager
+import androidx.appcompat.content.res.AppCompatResources
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -43,29 +46,42 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.toBitmap
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
-import com.google.android.gms.maps.CameraUpdateFactory
-import com.google.android.gms.maps.model.CameraPosition
-import com.google.android.gms.maps.model.LatLng
-import com.google.maps.android.compose.CameraPositionState
-import com.google.maps.android.compose.Circle
-import com.google.maps.android.compose.GoogleMap
-import com.google.maps.android.compose.MapProperties
-import com.google.maps.android.compose.MapUiSettings
-import com.google.maps.android.compose.Marker
-import com.google.maps.android.compose.MarkerState
-import com.google.maps.android.compose.rememberCameraPositionState
-import com.google.maps.android.compose.rememberMarkerState
+import io.github.whitphx.nolocationzones.R
 import io.github.whitphx.nolocationzones.domain.Zone
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import org.maplibre.android.camera.CameraPosition as MlCameraPosition
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.maps.MapLibreMap
+import org.maplibre.android.maps.MapView
+import org.maplibre.android.maps.Style
+import org.maplibre.android.plugins.annotation.Fill
+import org.maplibre.android.plugins.annotation.FillManager
+import org.maplibre.android.plugins.annotation.FillOptions
+import org.maplibre.android.plugins.annotation.Line
+import org.maplibre.android.plugins.annotation.LineManager
+import org.maplibre.android.plugins.annotation.LineOptions
+import org.maplibre.android.plugins.annotation.OnSymbolDragListener
+import org.maplibre.android.plugins.annotation.Symbol
+import org.maplibre.android.plugins.annotation.SymbolManager
+import org.maplibre.android.plugins.annotation.SymbolOptions
+
+private const val ZONE_PIN_ICON = "zone-pin"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -115,18 +131,9 @@ private fun ReadyBody(
 
     var name by remember { mutableStateOf(state.initialName) }
     var radius by remember { mutableFloatStateOf(state.initialRadiusMeters) }
-    @Suppress("DEPRECATION") // rememberMarkerState's mutability is what we need; the replacement
-    // (rememberUpdatedMarkerState) is for one-way state, but our marker is dragged by the user.
-    val markerState = rememberMarkerState(
-        position = LatLng(state.initialLatitude, state.initialLongitude),
-    )
-    val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(
-            LatLng(state.initialLatitude, state.initialLongitude),
-            if (state.locationKnown) 15f else 1f,
-        )
+    var pinLatLng by remember {
+        mutableStateOf(LatLng(state.initialLatitude, state.initialLongitude))
     }
-
     var pendingDelete by remember { mutableStateOf(false) }
 
     val hasFineLocationPermission = remember {
@@ -134,60 +141,32 @@ private fun ReadyBody(
             PackageManager.PERMISSION_GRANTED
     }
 
+    val refs = remember { MapRefs() }
+    val primaryColor = MaterialTheme.colorScheme.primary
+
     Column(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            GoogleMap(
-                modifier = Modifier.fillMaxSize(),
-                cameraPositionState = cameraPositionState,
-                properties = MapProperties(isMyLocationEnabled = hasFineLocationPermission),
-                uiSettings = MapUiSettings(
-                    myLocationButtonEnabled = false,
-                    zoomControlsEnabled = false,
-                    compassEnabled = true,
-                ),
-                onMapClick = { latLng ->
-                    markerState.position = latLng
-                    coroutineScope.launch {
-                        cameraPositionState.animate(CameraUpdateFactory.newLatLng(latLng))
-                    }
+            MapZoneMap(
+                refs = refs,
+                initialLatLng = LatLng(state.initialLatitude, state.initialLongitude),
+                initialZoom = if (state.locationKnown) 15.0 else 1.0,
+                pinLatLng = pinLatLng,
+                radiusMeters = radius,
+                otherZones = existing.filter { it.id != state.editingZoneId },
+                primaryColor = primaryColor,
+                onMapTap = { latLng ->
+                    pinLatLng = latLng
+                    refs.animateTo(latLng)
                 },
-            ) {
-                // Other zones rendered as faint gray circles for context. Skip the one being
-                // edited — its candidate circle is drawn below in the active style.
-                for (z in existing) {
-                    if (z.id == state.editingZoneId) continue
-                    Circle(
-                        center = LatLng(z.latitude, z.longitude),
-                        radius = z.radiusMeters.toDouble(),
-                        strokeColor = Color(0x66888888),
-                        fillColor = Color(0x22888888),
-                        strokeWidth = 2f,
-                    )
-                }
-
-                // Candidate zone: marker + filled circle showing the radius.
-                Circle(
-                    center = markerState.position,
-                    radius = radius.toDouble(),
-                    strokeColor = MaterialTheme.colorScheme.primary,
-                    fillColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
-                    strokeWidth = 4f,
-                )
-                Marker(
-                    state = markerState,
-                    draggable = true,
-                    title = name.ifBlank { "New zone" },
-                )
-            }
+                onPinDragged = { latLng -> pinLatLng = latLng },
+            )
 
             FilledIconButton(
                 onClick = {
                     coroutineScope.launch {
-                        recenterOnCurrentLocation(
-                            context = context,
-                            cameraPositionState = cameraPositionState,
-                            markerState = markerState,
-                        )
+                        val ll = currentLocation(context) ?: return@launch
+                        pinLatLng = ll
+                        refs.animateTo(ll, zoom = 15.0)
                     }
                 },
                 modifier = Modifier
@@ -207,8 +186,8 @@ private fun ReadyBody(
             onSave = {
                 viewModel.save(
                     name = name,
-                    latitude = markerState.position.latitude,
-                    longitude = markerState.position.longitude,
+                    latitude = pinLatLng.latitude,
+                    longitude = pinLatLng.longitude,
                     radiusMeters = radius,
                 )
                 onClose()
@@ -235,30 +214,239 @@ private fun ReadyBody(
         )
     }
 
-    // If we couldn't get a location fix in create mode, retry once when permission lands.
     LaunchedEffect(hasFineLocationPermission) {
         if (state.mode == MapZoneUiState.Mode.Create && !state.locationKnown && hasFineLocationPermission) {
-            recenterOnCurrentLocation(context, cameraPositionState, markerState)
+            val ll = currentLocation(context) ?: return@LaunchedEffect
+            pinLatLng = ll
+            refs.animateTo(ll, zoom = 15.0)
         }
     }
 }
 
-@SuppressLint("MissingPermission") // checked at call sites via the permission card flow
-private suspend fun recenterOnCurrentLocation(
-    context: android.content.Context,
-    cameraPositionState: CameraPositionState,
-    markerState: MarkerState,
+@Composable
+private fun MapZoneMap(
+    refs: MapRefs,
+    initialLatLng: LatLng,
+    initialZoom: Double,
+    pinLatLng: LatLng,
+    radiusMeters: Float,
+    otherZones: List<Zone>,
+    primaryColor: Color,
+    onMapTap: (LatLng) -> Unit,
+    onPinDragged: (LatLng) -> Unit,
 ) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val primaryArgb = primaryColor.toArgb()
+
+    AndroidView(
+        modifier = Modifier.fillMaxSize(),
+        factory = { ctx ->
+            val mapView = MapView(ctx)
+            mapView.onCreate(null)
+            refs.mapView = mapView
+            mapView.getMapAsync { map ->
+                refs.map = map
+                map.uiSettings.isAttributionEnabled = true
+                map.uiSettings.isLogoEnabled = false
+                map.cameraPosition = MlCameraPosition.Builder()
+                    .target(initialLatLng)
+                    .zoom(initialZoom)
+                    .build()
+                map.addOnMapClickListener { latLng ->
+                    onMapTap(latLng)
+                    true
+                }
+                map.setStyle(Style.Builder().fromUri(OPEN_FREE_MAP_LIBERTY)) { style ->
+                    refs.style = style
+
+                    val drawable = AppCompatResources.getDrawable(ctx, R.drawable.ic_zone_pin)
+                        ?.mutate()
+                        ?.apply { setTint(primaryArgb) }
+                    drawable?.toBitmap(96, 96)?.let { bmp -> style.addImage(ZONE_PIN_ICON, bmp) }
+
+                    refs.fillManager = FillManager(mapView, map, style)
+                    refs.lineManager = LineManager(mapView, map, style)
+                    refs.symbolManager = SymbolManager(mapView, map, style).apply {
+                        iconAllowOverlap = true
+                        iconIgnorePlacement = true
+                        addDragListener(object : OnSymbolDragListener {
+                            override fun onAnnotationDragStarted(annotation: Symbol) = Unit
+                            override fun onAnnotationDrag(annotation: Symbol) {
+                                onPinDragged(annotation.latLng)
+                            }
+                            override fun onAnnotationDragFinished(annotation: Symbol) {
+                                onPinDragged(annotation.latLng)
+                            }
+                        })
+                    }
+
+                    refs.applyState()
+                }
+            }
+            mapView
+        },
+        update = { _ ->
+            refs.pendingPin = pinLatLng
+            refs.pendingRadius = radiusMeters
+            refs.pendingOthers = otherZones
+            refs.pendingPrimaryArgb = primaryArgb
+            refs.applyState()
+        },
+    )
+
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, event ->
+            val mv = refs.mapView ?: return@LifecycleEventObserver
+            when (event) {
+                Lifecycle.Event.ON_START -> mv.onStart()
+                Lifecycle.Event.ON_RESUME -> mv.onResume()
+                Lifecycle.Event.ON_PAUSE -> mv.onPause()
+                Lifecycle.Event.ON_STOP -> mv.onStop()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(obs)
+            refs.symbolManager?.onDestroy()
+            refs.lineManager?.onDestroy()
+            refs.fillManager?.onDestroy()
+            refs.mapView?.onDestroy()
+            refs.mapView = null
+            refs.map = null
+            refs.style = null
+            refs.symbolManager = null
+            refs.fillManager = null
+            refs.lineManager = null
+        }
+    }
+}
+
+/**
+ * Holds the imperative MapLibre objects across recompositions and lets the camera-recenter
+ * button reach the underlying map without a separate state hoist.
+ *
+ * State the Compose layer wants drawn lives in the `pending*` fields. `applyState` is the only
+ * mutator of map overlays — it's a no-op until both the MapView is attached and the style has
+ * loaded, so calls during the async style load are safely buffered.
+ */
+private class MapRefs {
+    var mapView: MapView? = null
+    var map: MapLibreMap? = null
+    var style: Style? = null
+    var fillManager: FillManager? = null
+    var lineManager: LineManager? = null
+    var symbolManager: SymbolManager? = null
+
+    private var pinSymbol: Symbol? = null
+    private var candidateFill: Fill? = null
+    private var candidateOutline: Line? = null
+    private var existingFills: List<Fill> = emptyList()
+    private var existingOutlines: List<Line> = emptyList()
+    private var renderedOthersKey: List<OtherZoneKey> = emptyList()
+
+    var pendingPin: LatLng = LatLng(0.0, 0.0)
+    var pendingRadius: Float = Zone.MIN_RADIUS_METERS
+    var pendingOthers: List<Zone> = emptyList()
+    var pendingPrimaryArgb: Int = 0
+
+    fun animateTo(latLng: LatLng, zoom: Double? = null) {
+        val m = map ?: return
+        val update = if (zoom != null) {
+            CameraUpdateFactory.newLatLngZoom(latLng, zoom)
+        } else {
+            CameraUpdateFactory.newLatLng(latLng)
+        }
+        m.animateCamera(update)
+    }
+
+    fun applyState() {
+        val sm = symbolManager ?: return
+        val fm = fillManager ?: return
+        val lm = lineManager ?: return
+
+        val primaryHex = String.format("#%06X", pendingPrimaryArgb and 0xFFFFFF)
+
+        // Pin symbol — create once, then reposition. Drag handler updates pendingPin via the
+        // Compose state path, so re-asserting it here from pendingPin is a no-op during drag.
+        val existingSym = pinSymbol
+        if (existingSym == null) {
+            pinSymbol = sm.create(
+                SymbolOptions()
+                    .withLatLng(pendingPin)
+                    .withIconImage(ZONE_PIN_ICON)
+                    .withIconAnchor("bottom")
+                    .withDraggable(true),
+            )
+        } else if (existingSym.latLng != pendingPin) {
+            existingSym.latLng = pendingPin
+            sm.update(existingSym)
+        }
+
+        // Other zones: rebuild only when the set changes (not on every radius slider tick).
+        val currentKey = pendingOthers.map { OtherZoneKey(it.id, it.latitude, it.longitude, it.radiusMeters) }
+        if (currentKey != renderedOthersKey) {
+            existingFills.forEach(fm::delete)
+            existingOutlines.forEach(lm::delete)
+            existingFills = pendingOthers.map { z ->
+                val poly = circlePolygon(LatLng(z.latitude, z.longitude), z.radiusMeters.toDouble())
+                fm.create(
+                    FillOptions()
+                        .withLatLngs(listOf(poly))
+                        .withFillColor("#888888")
+                        .withFillOpacity(0.13f),
+                )
+            }
+            existingOutlines = pendingOthers.map { z ->
+                val poly = circlePolygon(LatLng(z.latitude, z.longitude), z.radiusMeters.toDouble())
+                lm.create(
+                    LineOptions()
+                        .withLatLngs(poly)
+                        .withLineColor("#666666")
+                        .withLineOpacity(0.6f)
+                        .withLineWidth(2f),
+                )
+            }
+            renderedOthersKey = currentKey
+        }
+
+        // Candidate circle: full re-create on every change. With a 64-vertex polygon and at
+        // most one fill+line, this is cheap.
+        candidateFill?.let(fm::delete)
+        candidateOutline?.let(lm::delete)
+        val candidatePoly = circlePolygon(pendingPin, pendingRadius.toDouble())
+        candidateFill = fm.create(
+            FillOptions()
+                .withLatLngs(listOf(candidatePoly))
+                .withFillColor(primaryHex)
+                .withFillOpacity(0.2f),
+        )
+        candidateOutline = lm.create(
+            LineOptions()
+                .withLatLngs(candidatePoly)
+                .withLineColor(primaryHex)
+                .withLineWidth(4f),
+        )
+    }
+
+    private data class OtherZoneKey(
+        val id: Long,
+        val lat: Double,
+        val lng: Double,
+        val radius: Float,
+    )
+}
+
+@SuppressLint("MissingPermission") // checked at the top of the function
+private suspend fun currentLocation(context: Context): LatLng? {
     if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) !=
         PackageManager.PERMISSION_GRANTED
-    ) return
+    ) return null
     val client = LocationServices.getFusedLocationProviderClient(context)
     val loc = runCatching {
         client.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null).await()
-    }.getOrNull() ?: return
-    val target = LatLng(loc.latitude, loc.longitude)
-    markerState.position = target
-    cameraPositionState.animate(CameraUpdateFactory.newLatLngZoom(target, 15f))
+    }.getOrNull() ?: return null
+    return LatLng(loc.latitude, loc.longitude)
 }
 
 @Composable

@@ -34,24 +34,30 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.google.android.gms.maps.model.CameraPosition
-import com.google.android.gms.maps.model.LatLng
-import com.google.maps.android.compose.Circle
-import com.google.maps.android.compose.GoogleMap
-import com.google.maps.android.compose.MapUiSettings
-import com.google.maps.android.compose.Marker
-import com.google.maps.android.compose.rememberCameraPositionState
-import com.google.maps.android.compose.rememberUpdatedMarkerState
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.runtime.DisposableEffect
 import io.github.whitphx.nolocationzones.domain.PendingStrip
 import io.github.whitphx.nolocationzones.domain.Zone
 import io.github.whitphx.nolocationzones.photo.ExifGpsReader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.maplibre.android.camera.CameraPosition as MlCameraPosition
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.maps.MapView
+import org.maplibre.android.maps.Style
+import org.maplibre.android.plugins.annotation.FillManager
+import org.maplibre.android.plugins.annotation.FillOptions
+import org.maplibre.android.plugins.annotation.LineManager
+import org.maplibre.android.plugins.annotation.LineOptions
 
 /**
  * Full-screen dialog that splits the viewport into two equal panes: the photo on top and the
@@ -228,31 +234,88 @@ private fun LocationPane(item: PendingStrip, zones: List<Zone>, modifier: Modifi
 
 @Composable
 private fun MapBody(lat: Double, lon: Double, zones: List<Zone>, modifier: Modifier = Modifier) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val primaryArgb = MaterialTheme.colorScheme.primary.toArgb()
+    val primaryHex = String.format("#%06X", primaryArgb and 0xFFFFFF)
     val target = LatLng(lat, lon)
-    val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(target, 16f)
-    }
-    val markerState = rememberUpdatedMarkerState(position = target)
-    GoogleMap(
+    val refs = remember { PhotoMapRefs() }
+
+    AndroidView(
         modifier = modifier,
-        cameraPositionState = cameraPositionState,
-        uiSettings = MapUiSettings(
-            zoomControlsEnabled = false,
-            myLocationButtonEnabled = false,
-            compassEnabled = true,
-        ),
-    ) {
-        for (z in zones) {
-            Circle(
-                center = LatLng(z.latitude, z.longitude),
-                radius = z.radiusMeters.toDouble(),
-                strokeColor = MaterialTheme.colorScheme.primary,
-                fillColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
-                strokeWidth = 3f,
-            )
+        factory = { ctx ->
+            val mapView = MapView(ctx)
+            mapView.onCreate(null)
+            refs.mapView = mapView
+            mapView.getMapAsync { map ->
+                map.uiSettings.isAttributionEnabled = true
+                map.uiSettings.isLogoEnabled = false
+                map.uiSettings.setAllGesturesEnabled(false)
+                map.cameraPosition = MlCameraPosition.Builder()
+                    .target(target)
+                    .zoom(16.0)
+                    .build()
+                map.setStyle(Style.Builder().fromUri(OPEN_FREE_MAP_LIBERTY)) { style ->
+                    val fm = FillManager(mapView, map, style).also { refs.fillManager = it }
+                    val lm = LineManager(mapView, map, style).also { refs.lineManager = it }
+                    for (z in zones) {
+                        val poly = circlePolygon(LatLng(z.latitude, z.longitude), z.radiusMeters.toDouble())
+                        fm.create(
+                            FillOptions()
+                                .withLatLngs(listOf(poly))
+                                .withFillColor(primaryHex)
+                                .withFillOpacity(0.18f),
+                        )
+                        lm.create(
+                            LineOptions()
+                                .withLatLngs(poly)
+                                .withLineColor(primaryHex)
+                                .withLineWidth(3f),
+                        )
+                    }
+                    // A solid 14px (~ ring) marker for the photo location, drawn as a tiny
+                    // 1-meter-radius polygon at the target. Cheap; avoids registering an icon
+                    // image just to show a stationary dot.
+                    val pinPoly = circlePolygon(target, radiusMeters = 6.0, steps = 24)
+                    fm.create(
+                        FillOptions()
+                            .withLatLngs(listOf(pinPoly))
+                            .withFillColor(primaryHex)
+                            .withFillOpacity(0.95f),
+                    )
+                }
+            }
+            mapView
+        },
+    )
+
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, event ->
+            val mv = refs.mapView ?: return@LifecycleEventObserver
+            when (event) {
+                Lifecycle.Event.ON_START -> mv.onStart()
+                Lifecycle.Event.ON_RESUME -> mv.onResume()
+                Lifecycle.Event.ON_PAUSE -> mv.onPause()
+                Lifecycle.Event.ON_STOP -> mv.onStop()
+                else -> {}
+            }
         }
-        Marker(state = markerState, title = "Photo location")
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(obs)
+            refs.lineManager?.onDestroy()
+            refs.fillManager?.onDestroy()
+            refs.mapView?.onDestroy()
+            refs.mapView = null
+            refs.fillManager = null
+            refs.lineManager = null
+        }
     }
+}
+
+private class PhotoMapRefs {
+    var mapView: MapView? = null
+    var fillManager: FillManager? = null
+    var lineManager: LineManager? = null
 }
 
 private fun buildSubtitle(item: PendingStrip): String? {

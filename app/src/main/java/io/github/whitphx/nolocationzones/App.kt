@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import androidx.core.content.getSystemService
 import io.github.whitphx.nolocationzones.di.AppContainer
+import org.maplibre.android.MapLibre
 
 class App : Application() {
     lateinit var container: AppContainer
@@ -13,6 +14,9 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        // The OpenFreeMap tile source is keyless; pass an empty token. MapLibre still requires
+        // initialization once per process before the first MapView is constructed.
+        MapLibre.getInstance(this)
         createNotificationChannels()
     }
 

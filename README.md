@@ -128,14 +128,7 @@ Prerequisites:
 
 - JDK 17 (`brew install openjdk@17` on macOS)
 - Android SDK with `platforms/android-36` and `build-tools/36.0.0`
-- A device running Android 11 or newer with Google Play services (geofencing and the map both require it)
-- A **Google Maps Android SDK API key** for the map-based zone editor. Create a project in the [Google Cloud Console](https://console.cloud.google.com/), enable *Maps SDK for Android*, generate an API key, and add it to `local.properties`:
-
-  ```properties
-  MAPS_API_KEY=PASTE_YOUR_GOOGLE_MAPS_API_KEY_HERE
-  ```
-
-  `local.properties` is gitignored. Without a key the app still builds and runs, but the map view will be blank — every other feature works fine. For a personal-use build, restrict the key to your app's package name + debug-signing SHA-1 fingerprint.
+- A device running Android 11 or newer with Google Play services (required for geofencing). The map-based zone editor uses [MapLibre Native](https://maplibre.org/) with [OpenFreeMap](https://openfreemap.org/) vector tiles and does **not** require an API key, billing account, or signup of any kind.
 
 ```sh
 ./gradlew :app:assembleDebug

@@ -26,14 +26,6 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Write Maps API key (optional)
-        env:
-          MAPS_API_KEY: ${{ secrets.MAPS_API_KEY }}
-        run: |
-          if [ -n "$MAPS_API_KEY" ]; then
-            echo "MAPS_API_KEY=$MAPS_API_KEY" > local.properties
-          fi
-
       - name: Android lint
         run: ./gradlew :app:lintDebug
 
