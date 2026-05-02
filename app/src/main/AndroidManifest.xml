@@ -56,7 +56,7 @@
             android:name=".geofence.GeofenceBroadcastReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="dev.whitphx.nolocationzones.GEOFENCE_TRANSITION" />
+                <action android:name="io.github.whitphx.nolocationzones.GEOFENCE_TRANSITION" />
             </intent-filter>
         </receiver>
 
@@ -64,7 +64,7 @@
             android:name=".photo.PhotoActionReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="dev.whitphx.nolocationzones.action.SKIP" />
+                <action android:name="io.github.whitphx.nolocationzones.action.SKIP" />
             </intent-filter>
         </receiver>
 

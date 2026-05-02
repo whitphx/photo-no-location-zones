@@ -75,7 +75,7 @@ The stock camera app still runs, which means computational-photography features 
 ### Module layout
 
 ```
-dev.whitphx.nolocationzones
+io.github.whitphx.nolocationzones
 ├── App.kt                  Application + notification channels + DI root
 ├── MainActivity.kt         Single Compose-hosting activity; honors OPEN_REVIEW /
 │                           STRIP_PHOTO / SHOW_LOCATION deep-link intents

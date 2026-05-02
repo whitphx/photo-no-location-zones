@@ -14,10 +14,10 @@ val mapsApiKey: String = run {
 }
 
 android {
-    namespace = "dev.whitphx.nolocationzones"
+    namespace = "io.github.whitphx.nolocationzones"
     compileSdk = 36
     defaultConfig {
-        applicationId = "dev.whitphx.nolocationzones"
+        applicationId = "io.github.whitphx.nolocationzones"
         minSdk = 30
         targetSdk = 36
         versionCode = 1
