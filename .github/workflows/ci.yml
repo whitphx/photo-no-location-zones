@@ -85,3 +85,35 @@ jobs:
           files: artifacts/app-*-debug.apk
           generate_release_notes: true
           fail_on_unmatched_files: true
+
+  distribute-firebase:
+    name: Firebase App Distribution
+    needs: build
+    # Only on pushes to main — PRs are untrusted, tags go through GitHub Releases.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download debug APK
+        uses: actions/download-artifact@v4
+        with:
+          name: app-debug
+          path: artifacts
+
+      - name: Build release notes
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          {
+            printf '%s\n\n' "${COMMIT_MESSAGE}"
+            printf 'commit %s\n' "${COMMIT_SHA}"
+          } > release-notes.txt
+
+      - name: Distribute to Firebase
+        uses: wzieba/Firebase-Distribution-Github-Action@v1
+        with:
+          appId: ${{ secrets.FIREBASE_APP_ID }}
+          serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          groups: ${{ vars.FIREBASE_TESTER_GROUPS || 'testers' }}
+          file: artifacts/app-debug.apk
+          releaseNotesFile: release-notes.txt
