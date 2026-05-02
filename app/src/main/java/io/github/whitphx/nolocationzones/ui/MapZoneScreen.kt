@@ -5,6 +5,8 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import androidx.appcompat.content.res.AppCompatResources
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,12 +15,19 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -31,8 +40,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -48,6 +59,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -62,6 +74,8 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import io.github.whitphx.nolocationzones.R
 import io.github.whitphx.nolocationzones.domain.Zone
+import io.github.whitphx.nolocationzones.place.PhotonGeocoder
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import org.maplibre.android.camera.CameraPosition as MlCameraPosition
@@ -144,6 +158,9 @@ private fun ReadyBody(
     val refs = remember { MapRefs() }
     val primaryColor = MaterialTheme.colorScheme.primary
 
+    var searchResultsCleared by remember { mutableStateOf(false) }
+    val onSearchResultsCleared: () -> Unit = { searchResultsCleared = true }
+
     Column(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             MapZoneMap(
@@ -157,8 +174,23 @@ private fun ReadyBody(
                 onMapTap = { latLng ->
                     pinLatLng = latLng
                     refs.animateTo(latLng)
+                    onSearchResultsCleared()
                 },
                 onPinDragged = { latLng -> pinLatLng = latLng },
+            )
+
+            SearchOverlay(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .fillMaxWidth(),
+                clearResultsSignal = searchResultsCleared,
+                onResultsConsumed = { searchResultsCleared = false },
+                onPick = { result ->
+                    val ll = LatLng(result.lat, result.lon)
+                    pinLatLng = ll
+                    refs.animateTo(ll, zoom = 14.0)
+                },
             )
 
             FilledIconButton(
@@ -567,5 +599,134 @@ private fun LoadingBox() {
 private fun ErrorBox(message: String) {
     Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
         Text(message, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+/**
+ * Search box overlaid at the top of the map. As the user types, debounces 350 ms and queries
+ * Photon (no API key, OSM-backed). Tapping a result flies the camera there and moves the pin.
+ *
+ * The caller drives a "clear results" pulse via [clearResultsSignal]: when the user taps
+ * elsewhere on the map, the overlay collapses its result list. We use a one-shot bool +
+ * `onResultsConsumed` callback rather than a regular state so successive taps work without the
+ * caller having to reset on its own.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SearchOverlay(
+    modifier: Modifier = Modifier,
+    clearResultsSignal: Boolean,
+    onResultsConsumed: () -> Unit,
+    onPick: (PhotonGeocoder.GeoResult) -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<PhotonGeocoder.GeoResult>>(emptyList()) }
+    var lastPickedQuery by remember { mutableStateOf<String?>(null) }
+    val keyboard = LocalSoftwareKeyboardController.current
+
+    // Debounced search. Skip when the current query is exactly the one we just auto-set after a
+    // pick — otherwise the field text would re-trigger a network call for the picked place.
+    LaunchedEffect(query) {
+        if (query == lastPickedQuery) return@LaunchedEffect
+        delay(350)
+        results = PhotonGeocoder.search(query)
+    }
+
+    // Map taps (or other external "dismiss" sources) collapse the result list without losing the
+    // typed query — the user can resume by tapping back into the field.
+    LaunchedEffect(clearResultsSignal) {
+        if (clearResultsSignal) {
+            results = emptyList()
+            onResultsConsumed()
+        }
+    }
+
+    Column(modifier = modifier.widthIn(max = 560.dp)) {
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 4.dp,
+            shadowElevation = 4.dp,
+        ) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = {
+                    query = it
+                    if (lastPickedQuery != null && it != lastPickedQuery) lastPickedQuery = null
+                },
+                placeholder = { Text("Search a place") },
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                trailingIcon = if (query.isNotEmpty()) {
+                    {
+                        IconButton(onClick = {
+                            query = ""
+                            results = emptyList()
+                            lastPickedQuery = null
+                        }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Clear search")
+                        }
+                    }
+                } else null,
+                singleLine = true,
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        if (results.isNotEmpty()) {
+            Spacer(Modifier.height(6.dp))
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 4.dp,
+                shadowElevation = 4.dp,
+            ) {
+                LazyColumn(
+                    // Cap so the dropdown never eats the whole map even with 8 long-named results.
+                    modifier = Modifier.heightIn(max = 320.dp),
+                ) {
+                    items(results) { result ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onPick(result)
+                                    query = result.name
+                                    lastPickedQuery = result.name
+                                    results = emptyList()
+                                    keyboard?.hide()
+                                }
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                Icons.Filled.Search,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(end = 12.dp),
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    result.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                                if (result.description.isNotBlank()) {
+                                    Text(
+                                        result.description,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
