@@ -29,8 +29,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
@@ -954,10 +952,16 @@ private fun FilterSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
     ) {
+        // No inner verticalScroll: ModalBottomSheet drives its own drag gesture, and a
+        // verticalScroll wrapper here would also claim a NestedScrollConnection, causing the
+        // sheet's spring-back animation to fight with the inner scroll dispatcher. The visible
+        // symptom is a "shake" when the user drags the handle down a small amount and it
+        // animates back to expanded. The filter content is short enough to fit on screen for
+        // realistic zone counts; if the inner sections ever grow taller, prefer adding a
+        // LazyColumn around the offending section over re-introducing verticalScroll here.
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 24.dp),
         ) {
