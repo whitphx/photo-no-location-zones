@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
@@ -305,17 +306,29 @@ fun HomeScreen(
                         onClick = { rescanMenuOpen = true },
                         enabled = !rescanning,
                     ) {
-                        Icon(Icons.Filled.Refresh, contentDescription = "Rescan past photos")
+                        Icon(Icons.Filled.Refresh, contentDescription = "Scan past media")
                     }
                     DropdownMenu(
                         expanded = rescanMenuOpen,
                         onDismissRequest = { rescanMenuOpen = false },
                     ) {
                         Text(
-                            "Rescan past photos",
+                            "Scan past media",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                        Text(
+                            // The picker bounds scan cost (one EXIF / MP4 atom read per row);
+                            // it is not a display filter. Calling that out so users with the
+                            // queue's date filter open don't think the two settings duplicate.
+                            "Limits how far back to scan, not what is shown. Use Filter to narrow further.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .padding(horizontal = 16.dp)
+                                .padding(bottom = 8.dp)
+                                .widthIn(max = 280.dp),
                         )
                         listOf(
                             "Last 30 days" to 30,
