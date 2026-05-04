@@ -924,7 +924,9 @@ private fun ActiveFilterChipsRow(
                 FilterChipPill(formatDateRange(d.fromMs, d.toMs)) { onFilterChange(filter.copy(date = DateFilter.All)) }
             }
         }
-        items(filter.zones.toList()) { zone ->
+        // Sort so chip order is stable across add/remove cycles. Set iteration order is
+        // unspecified; without sorting, removing then re-adding a zone could shuffle siblings.
+        items(filter.zones.sorted()) { zone ->
             FilterChipPill("Zone: $zone") { onFilterChange(filter.copy(zones = filter.zones - zone)) }
         }
     }
@@ -1037,15 +1039,22 @@ private fun FilterSheet(
 
             if (availableZones.isNotEmpty()) {
                 FilterSection("Zones") {
-                    availableZones.forEach { zone ->
-                        CheckboxOption(
-                            label = zone,
-                            checked = zone in filter.zones,
-                            onCheckedChange = { checked ->
-                                val next = if (checked) filter.zones + zone else filter.zones - zone
-                                onFilterChange(filter.copy(zones = next))
-                            },
-                        )
+                    // Bounded LazyColumn keeps a setup with many zones from pushing the
+                    // sheet content off-screen. Bounding height (rather than re-introducing a
+                    // top-level verticalScroll) is what avoids the gesture-fight that caused
+                    // the earlier shake — the LazyColumn's NestedScrollConnection only sees
+                    // drags inside its own bounds.
+                    LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
+                        items(availableZones) { zone ->
+                            CheckboxOption(
+                                label = zone,
+                                checked = zone in filter.zones,
+                                onCheckedChange = { checked ->
+                                    val next = if (checked) filter.zones + zone else filter.zones - zone
+                                    onFilterChange(filter.copy(zones = next))
+                                },
+                            )
+                        }
                     }
                 }
             }

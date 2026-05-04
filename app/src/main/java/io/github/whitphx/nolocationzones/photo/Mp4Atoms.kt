@@ -18,6 +18,9 @@ import java.io.FileDescriptor
  * On the wire the type field is conventionally a 4-char ASCII code (`'m','o','o','v'`). We pack it
  * into a single 32-bit big-endian Int for cheap equality checks. QuickTime location atoms use the
  * non-ASCII byte `0xA9` ('©'), so we expose [atomBytes] alongside [atom] for those.
+ *
+ * Reads go through [BoxReader] rather than directly hitting `android.system.Os` so the walker
+ * is testable on the JVM with synthetic byte arrays — production code uses [FdBoxReader].
  */
 internal object Mp4Atoms {
     val MOOV: Int = atom("moov")
@@ -50,20 +53,6 @@ internal object Mp4Atoms {
     fun atomBytes(a: Int, b: Int, c: Int, d: Int): Int =
         ((a and 0xFF) shl 24) or ((b and 0xFF) shl 16) or ((c and 0xFF) shl 8) or (d and 0xFF)
 
-    fun fileSize(fd: FileDescriptor): Long = Os.fstat(fd).st_size
-
-    /** Read [length] bytes at absolute [position] into [buf] starting at [bufOffset]. */
-    fun readFully(fd: FileDescriptor, position: Long, buf: ByteArray, bufOffset: Int, length: Int): Int {
-        Os.lseek(fd, position, OsConstants.SEEK_SET)
-        var got = 0
-        while (got < length) {
-            val n = Os.read(fd, buf, bufOffset + got, length - got)
-            if (n <= 0) break
-            got += n
-        }
-        return got
-    }
-
     /**
      * Walk the boxes between `[start, end)`. For each, invoke [onBox] with:
      *  - `type`: 4-byte type packed big-endian (use [atom] / [atomBytes] for comparisons)
@@ -77,7 +66,7 @@ internal object Mp4Atoms {
      * clear it, and the post-strip verification will warn.
      */
     inline fun walkBoxes(
-        fd: FileDescriptor,
+        reader: BoxReader,
         start: Long,
         end: Long,
         onBox: (type: Int, payloadStart: Long, payloadEnd: Long, typeOffset: Long) -> Unit,
@@ -86,7 +75,7 @@ internal object Mp4Atoms {
         val header = ByteArray(8)
         val ext = ByteArray(8)
         while (pos + 8 <= end) {
-            val r = readFully(fd, pos, header, 0, 8)
+            val r = reader.read(pos, header, 0, 8)
             if (r < 8) return
             val size32 = ((header[0].toInt() and 0xFF) shl 24) or
                 ((header[1].toInt() and 0xFF) shl 16) or
@@ -105,7 +94,7 @@ internal object Mp4Atoms {
                     payloadEnd = end
                 }
                 1 -> {
-                    val r2 = readFully(fd, pos + 8, ext, 0, 8)
+                    val r2 = reader.read(pos + 8, ext, 0, 8)
                     if (r2 < 8) return
                     val size64 = ((ext[0].toLong() and 0xFF) shl 56) or
                         ((ext[1].toLong() and 0xFF) shl 48) or
@@ -131,5 +120,34 @@ internal object Mp4Atoms {
             onBox(type, payloadStart, payloadEnd, typeOffset)
             pos = payloadEnd
         }
+    }
+}
+
+/**
+ * Random-access read interface for [Mp4Atoms.walkBoxes]. The interface exists so the walker is
+ * testable on the JVM with byte-array fixtures — production code wraps a `FileDescriptor` via
+ * [FdBoxReader], tests can implement it against a `ByteArray`.
+ */
+internal interface BoxReader {
+    /** File length in bytes. */
+    val size: Long
+    /** Reads up to [length] bytes at [position] into `buf[offset..offset+length)`; returns the
+     *  number actually read. Less than [length] indicates EOF. Implementations must not throw on
+     *  EOF — return 0 instead. */
+    fun read(position: Long, buf: ByteArray, offset: Int, length: Int): Int
+}
+
+internal class FdBoxReader(private val fd: FileDescriptor) : BoxReader {
+    override val size: Long = Os.fstat(fd).st_size
+
+    override fun read(position: Long, buf: ByteArray, offset: Int, length: Int): Int {
+        Os.lseek(fd, position, OsConstants.SEEK_SET)
+        var got = 0
+        while (got < length) {
+            val n = Os.read(fd, buf, offset + got, length - got)
+            if (n <= 0) break
+            got += n
+        }
+        return got
     }
 }

@@ -36,7 +36,7 @@ object Mp4GpsStripper {
     /** Read-only existence check. Cheap because we walk only `moov/udta`, never the bulk `mdat`. */
     fun hasLocationAtoms(resolver: ContentResolver, uri: Uri): Boolean = try {
         resolver.openFileDescriptor(uri, "r")?.use { pfd ->
-            findLocationAtomTypeOffsets(pfd.fileDescriptor).isNotEmpty()
+            findLocationAtomTypeOffsets(FdBoxReader(pfd.fileDescriptor)).isNotEmpty()
         } ?: false
     } catch (t: Throwable) {
         Log.w(TAG, "hasLocationAtoms failed for $uri", t)
@@ -53,7 +53,7 @@ object Mp4GpsStripper {
         val result = pfd.use { descriptor ->
             try {
                 val fd = descriptor.fileDescriptor
-                val typeOffsets = findLocationAtomTypeOffsets(fd)
+                val typeOffsets = findLocationAtomTypeOffsets(FdBoxReader(fd))
                 if (typeOffsets.isEmpty()) {
                     Result.NoChange
                 } else {
@@ -78,14 +78,18 @@ object Mp4GpsStripper {
         return result
     }
 
-    private fun findLocationAtomTypeOffsets(fd: FileDescriptor): List<Long> {
-        val end = Mp4Atoms.fileSize(fd)
+    /**
+     * Visible for testing — operates on any [BoxReader]. Returns the absolute byte offsets of
+     * the 4-byte type tag of every recognised location atom found inside `moov/udta`.
+     */
+    internal fun findLocationAtomTypeOffsets(reader: BoxReader): List<Long> {
+        val end = reader.size
         val results = mutableListOf<Long>()
-        Mp4Atoms.walkBoxes(fd, 0L, end) { type, payloadStart, payloadEnd, _ ->
+        Mp4Atoms.walkBoxes(reader, 0L, end) { type, payloadStart, payloadEnd, _ ->
             if (type != Mp4Atoms.MOOV) return@walkBoxes
-            Mp4Atoms.walkBoxes(fd, payloadStart, payloadEnd) { t2, p2s, p2e, _ ->
+            Mp4Atoms.walkBoxes(reader, payloadStart, payloadEnd) { t2, p2s, p2e, _ ->
                 if (t2 != Mp4Atoms.UDTA) return@walkBoxes
-                Mp4Atoms.walkBoxes(fd, p2s, p2e) { t3, _, _, t3o ->
+                Mp4Atoms.walkBoxes(reader, p2s, p2e) { t3, _, _, t3o ->
                     if (t3 in Mp4Atoms.LOCATION_ATOMS) results += t3o
                 }
             }
@@ -97,7 +101,7 @@ object Mp4GpsStripper {
     private fun verifyClean(resolver: ContentResolver, uri: Uri) {
         try {
             resolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                val survivors = findLocationAtomTypeOffsets(pfd.fileDescriptor)
+                val survivors = findLocationAtomTypeOffsets(FdBoxReader(pfd.fileDescriptor))
                 if (survivors.isNotEmpty()) {
                     Log.w(TAG, "Post-strip verification: ${survivors.size} location atom(s) survived for $uri")
                 }

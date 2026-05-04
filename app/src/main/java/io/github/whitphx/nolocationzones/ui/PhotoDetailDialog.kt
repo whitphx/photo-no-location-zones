@@ -239,6 +239,7 @@ private fun LocationPane(item: PendingStrip, zones: List<Zone>, modifier: Modifi
 
 @Composable
 private fun MapBody(lat: Double, lon: Double, zones: List<Zone>, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val primaryArgb = MaterialTheme.colorScheme.primary.toArgb()
     val primaryHex = String.format("#%06X", primaryArgb and 0xFFFFFF)
@@ -304,9 +305,13 @@ private fun MapBody(lat: Double, lon: Double, zones: List<Zone>, modifier: Modif
                 else -> {}
             }
         }
+        val app = context.applicationContext
+        val memCallbacks = mapMemoryCallbacks { refs.mapView?.onLowMemory() }
+        app.registerComponentCallbacks(memCallbacks)
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(obs)
+            app.unregisterComponentCallbacks(memCallbacks)
             refs.lineManager?.onDestroy()
             refs.fillManager?.onDestroy()
             refs.mapView?.onDestroy()

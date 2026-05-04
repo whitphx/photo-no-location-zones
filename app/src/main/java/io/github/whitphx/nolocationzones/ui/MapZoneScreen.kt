@@ -267,6 +267,7 @@ private fun MapZoneMap(
     onMapTap: (LatLng) -> Unit,
     onPinDragged: (LatLng) -> Unit,
 ) {
+    val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val primaryArgb = primaryColor.toArgb()
 
@@ -337,9 +338,16 @@ private fun MapZoneMap(
                 else -> {}
             }
         }
+        // MapLibre asks callers to forward low-memory pressure so it can flush its tile cache.
+        // We hook ComponentCallbacks2 alongside the lifecycle observer so the cache shrinks
+        // promptly when the app is backgrounded under memory pressure.
+        val app = context.applicationContext
+        val memCallbacks = mapMemoryCallbacks { refs.mapView?.onLowMemory() }
+        app.registerComponentCallbacks(memCallbacks)
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(obs)
+            app.unregisterComponentCallbacks(memCallbacks)
             refs.symbolManager?.onDestroy()
             refs.lineManager?.onDestroy()
             refs.fillManager?.onDestroy()
@@ -353,6 +361,20 @@ private fun MapZoneMap(
         }
     }
 }
+
+/**
+ * Adapter used by both map composables to forward memory pressure to the underlying [MapView].
+ * The bare `ComponentCallbacks` interface (parent of `ComponentCallbacks2`) is enough — we only
+ * care about the boolean "trim caches now" signal, not the per-level trim hierarchy that was
+ * deprecated in API 35.
+ */
+internal fun mapMemoryCallbacks(onLowMemory: () -> Unit): android.content.ComponentCallbacks =
+    object : android.content.ComponentCallbacks {
+        override fun onConfigurationChanged(newConfig: android.content.res.Configuration) = Unit
+        override fun onLowMemory() {
+            onLowMemory.invoke()
+        }
+    }
 
 /**
  * Holds the imperative MapLibre objects across recompositions and lets the camera-recenter
@@ -442,23 +464,36 @@ private class MapRefs {
             renderedOthersKey = currentKey
         }
 
-        // Candidate circle: full re-create on every change. With a 64-vertex polygon and at
-        // most one fill+line, this is cheap.
-        candidateFill?.let(fm::delete)
-        candidateOutline?.let(lm::delete)
+        // Candidate circle: create once, then mutate-and-update on subsequent calls. The pin
+        // drag listener fires applyState ~per frame; delete+create on every tick was visible
+        // jank on lower-end devices because each pair of ops triggered a layer redraw.
         val candidatePoly = circlePolygon(pendingPin, pendingRadius.toDouble())
-        candidateFill = fm.create(
-            FillOptions()
-                .withLatLngs(listOf(candidatePoly))
-                .withFillColor(primaryHex)
-                .withFillOpacity(0.2f),
-        )
-        candidateOutline = lm.create(
-            LineOptions()
-                .withLatLngs(candidatePoly)
-                .withLineColor(primaryHex)
-                .withLineWidth(4f),
-        )
+        val cf = candidateFill
+        if (cf == null) {
+            candidateFill = fm.create(
+                FillOptions()
+                    .withLatLngs(listOf(candidatePoly))
+                    .withFillColor(primaryHex)
+                    .withFillOpacity(0.2f),
+            )
+        } else {
+            cf.latLngs = listOf(candidatePoly)
+            cf.fillColor = primaryHex
+            fm.update(cf)
+        }
+        val cl = candidateOutline
+        if (cl == null) {
+            candidateOutline = lm.create(
+                LineOptions()
+                    .withLatLngs(candidatePoly)
+                    .withLineColor(primaryHex)
+                    .withLineWidth(4f),
+            )
+        } else {
+            cl.latLngs = candidatePoly
+            cl.lineColor = primaryHex
+            lm.update(cl)
+        }
     }
 
     private data class OtherZoneKey(

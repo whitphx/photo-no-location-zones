@@ -9,7 +9,7 @@ Toolchain: JDK 17, Kotlin 2.3.20, AGP 9, `compileSdk 36`, `minSdk 30`, `targetSd
 ```sh
 ./gradlew :app:assembleDebug                  # build debug APK
 ./gradlew :app:lintDebug                      # Android lint
-./gradlew test                                # JVM unit tests (currently none)
+./gradlew test                                # JVM unit tests (Mp4 atom walker, ReviewFilter)
 ./gradlew :app:connectedAndroidTest           # instrumented tests on a connected device
 android run --apks=app/build/outputs/apk/debug/app-debug.apk   # deploy to connected device
 ```

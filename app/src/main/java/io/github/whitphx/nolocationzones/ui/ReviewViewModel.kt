@@ -27,7 +27,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
-import java.util.concurrent.TimeUnit
+import java.time.Instant
+import java.time.ZoneId
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -53,7 +54,12 @@ enum class MediaTypeFilter(val label: String) {
 sealed interface DateFilter {
     data object All : DateFilter
 
-    /** Last [days] days, anchored to the time the filter is evaluated. Includes today. */
+    /**
+     * Last [days] calendar days in the device's local time zone, including today.
+     * `LastDays(1)` = "since 00:00 today"; `LastDays(7)` = "since 00:00 six days ago".
+     * Anchored to start-of-day (not now − 24h) so the "Today" preset matches a user's mental
+     * calendar regardless of when they open the screen.
+     */
     data class LastDays(val days: Int, val label: String) : DateFilter
 
     /** Inclusive `[fromMs, toMs]` range, day-aligned at the call site. */
@@ -63,7 +69,7 @@ sealed interface DateFilter {
         val ts = if (item.dateTakenMs > 0L) item.dateTakenMs else item.detectedAt
         return when (this) {
             All -> true
-            is LastDays -> ts >= nowMs - TimeUnit.DAYS.toMillis(days.toLong())
+            is LastDays -> ts >= startOfDayMs(nowMs, daysBack = (days - 1).coerceAtLeast(0).toLong())
             is Range -> ts in fromMs..toMs
         }
     }
@@ -75,6 +81,20 @@ sealed interface DateFilter {
             LastDays(days = 30, label = "Last 30 days"),
             LastDays(days = 90, label = "Last 90 days"),
         )
+
+        /**
+         * Epoch ms for the start of the local day [daysBack] days before the day containing
+         * [nowMs]. Pulled out so unit tests can drive deterministic clocks without touching
+         * the system zone.
+         */
+        internal fun startOfDayMs(
+            nowMs: Long,
+            daysBack: Long,
+            zone: ZoneId = ZoneId.systemDefault(),
+        ): Long {
+            val today = Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
+            return today.minusDays(daysBack).atStartOfDay(zone).toInstant().toEpochMilli()
+        }
     }
 }
 

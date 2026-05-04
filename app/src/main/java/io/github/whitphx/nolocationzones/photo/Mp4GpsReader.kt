@@ -26,27 +26,27 @@ object Mp4GpsReader {
         null
     }
 
-    private fun readGps(fd: FileDescriptor): DoubleArray? {
-        val end = Mp4Atoms.fileSize(fd)
+    private fun readGps(fd: FileDescriptor): DoubleArray? = readGps(FdBoxReader(fd))
+
+    /**
+     * Visible for testing. Same algorithm as the FD entry point, but operates on any
+     * [BoxReader] so JVM tests can drive it with synthetic byte arrays.
+     */
+    internal fun readGps(reader: BoxReader): DoubleArray? {
+        val end = reader.size
         var found: DoubleArray? = null
-        Mp4Atoms.walkBoxes(fd, 0L, end) { type, payloadStart, payloadEnd, _ ->
+        Mp4Atoms.walkBoxes(reader, 0L, end) { type, payloadStart, payloadEnd, _ ->
             if (type != Mp4Atoms.MOOV || found != null) return@walkBoxes
-            Mp4Atoms.walkBoxes(fd, payloadStart, payloadEnd) { t2, p2s, p2e, _ ->
+            Mp4Atoms.walkBoxes(reader, payloadStart, payloadEnd) { t2, p2s, p2e, _ ->
                 if (t2 != Mp4Atoms.UDTA || found != null) return@walkBoxes
-                Mp4Atoms.walkBoxes(fd, p2s, p2e) { t3, p3s, p3e, _ ->
+                Mp4Atoms.walkBoxes(reader, p2s, p2e) { t3, p3s, p3e, _ ->
                     if (t3 != Mp4Atoms.XYZ || found != null) return@walkBoxes
                     val len = (p3e - p3s).toInt()
-                    if (len < 4) return@walkBoxes
+                    if (len < 1) return@walkBoxes
                     val buf = ByteArray(len)
-                    val r = Mp4Atoms.readFully(fd, p3s, buf, 0, len)
-                    if (r < 4) return@walkBoxes
-                    // QuickTime ©xyz payload: 2-byte text length (big-endian), 2-byte language code,
-                    // then UTF-8 ISO 6709 text. The trailing '/' is part of the standard format.
-                    val textLen = ((buf[0].toInt() and 0xFF) shl 8) or (buf[1].toInt() and 0xFF)
-                    val effective = minOf(textLen, r - 4).coerceAtLeast(0)
-                    if (effective <= 0) return@walkBoxes
-                    val text = String(buf, 4, effective, StandardCharsets.UTF_8)
-                    found = parseIso6709(text)
+                    val r = reader.read(p3s, buf, 0, len)
+                    if (r < 1) return@walkBoxes
+                    found = parseAtomPayload(buf, r)
                 }
             }
         }
@@ -54,13 +54,34 @@ object Mp4GpsReader {
     }
 
     /**
-     * ISO 6709 simple form: `±DD.DDDD±DDD.DDDD[±AAA.AAA]/`. We pluck the first two signed numbers
-     * and ignore altitude/CRS suffixes — we only need lat/lon for the in-app map.
+     * Most cameras follow the QuickTime convention — `[u16 textLen][u16 language][text]` — so
+     * we try the prefixed parse first. A few non-conformant writers store the raw ISO 6709
+     * string with no header; in that case the prefixed parse either returns null (range
+     * validation rejects bogus numbers) or never matches because the regex needs a leading
+     * sign at offset 4. The fallback re-runs the regex against the entire payload.
      */
-    private fun parseIso6709(s: String): DoubleArray? {
+    internal fun parseAtomPayload(buf: ByteArray, length: Int): DoubleArray? {
+        if (length >= 4) {
+            val textLen = ((buf[0].toInt() and 0xFF) shl 8) or (buf[1].toInt() and 0xFF)
+            val effective = minOf(textLen, length - 4).coerceAtLeast(0)
+            if (effective > 0) {
+                parseIso6709(String(buf, 4, effective, StandardCharsets.UTF_8))?.let { return it }
+            }
+        }
+        return parseIso6709(String(buf, 0, length, StandardCharsets.UTF_8))
+    }
+
+    /**
+     * ISO 6709 simple form: `±DD.DDDD±DDD.DDDD[±AAA.AAA]/`. We pluck the first two signed numbers
+     * and ignore altitude / CRS suffixes — we only need lat/lon for the in-app map. Both values
+     * are range-validated so a partial parse (e.g. when a leading sign was stripped) is rejected
+     * rather than returned as a real location.
+     */
+    internal fun parseIso6709(s: String): DoubleArray? {
         val matcher = ISO_6709.find(s) ?: return null
         val lat = matcher.groupValues[1].toDoubleOrNull() ?: return null
         val lon = matcher.groupValues[2].toDoubleOrNull() ?: return null
+        if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return null
         return doubleArrayOf(lat, lon)
     }
 
