@@ -205,3 +205,7 @@ A user who wants the most thorough scrub should run a separate desktop tool (e.g
 - **Per-zone schedules.** "Strip GPS only on weekends at the office" — would require a small scheduler layered on top of the active-zone state.
 - **Auto-strip option for a Play-Store version.** With `MediaStore.createWriteRequest()` you can pre-collect a session's worth of photos and submit one consent dialog at the moment of a UI-foreground event (e.g. when the user opens the camera app). The current MVP keeps the model deliberately simple: detect, queue, prompt-on-review.
 - **Bulk skip with tombstone.** Skipped photos are forgotten but could re-appear if MediaStore rescans (e.g. via the manual *Rescan* in Settings). A persistent "skipped" set would prevent that.
+
+## License
+
+[MIT](./LICENSE).
