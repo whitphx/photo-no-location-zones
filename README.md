@@ -148,6 +148,10 @@ First-run setup, in this order:
 8. Verify the result with any EXIF viewer — GPS tags should be absent.
 9. Walk outside the zone (or shrink the radius and step away). The **Inside** badge flips to **Outside** and monitoring stops.
 
+## Privacy contract
+
+The cross-platform privacy contract — which EXIF tags must be cleared, which MP4 atoms must be retagged, which gaps are documented — lives in [`SPEC.md`](./SPEC.md). It is the canonical source for any implementation (this Android app, the planned iOS app, future ports) and any privacy-correctness change starts there.
+
 ## Privacy gaps — what the scrubber does and does NOT cover
 
 The scrubber clears the obvious metadata. There are several places location and identity info can hide that we deliberately don't (or can't) reach yet — anyone using this for serious privacy needs to know about them.

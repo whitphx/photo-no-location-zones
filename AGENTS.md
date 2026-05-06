@@ -22,6 +22,8 @@ The map-based zone editor uses **MapLibre Native Android** with **OpenFreeMap** 
 
 The high-level diagram lives in `README.md` ("Architecture" section). The notes below are the non-obvious rules a change must respect.
 
+> **Cross-platform privacy contract:** anything that affects which tags/atoms are stripped, the order of operations around `createWriteRequest`, or the geofence-triggered detection model is governed by [`SPEC.md`](./SPEC.md), the canonical contract shared with the iOS implementation. Behavior changes there require a SPEC.md PR first, then code.
+
 ### Detection vs. modification — never collapse the two
 
 The geofence-triggered `PhotoMonitorService` only **observes and queues** newly captured photos and videos. It must never write to a file. Writes are *exclusively* gated by `MediaStore.createWriteRequest()` and the system consent dialog — `ReviewViewModel` raises a `RequestWriteAccess` event, `MainActivity` launches it via `StartIntentSenderForResult`, and only on success does the strip pipeline run on the granted URIs. Bypassing this is a privacy regression and breaks the safety story in the README.
